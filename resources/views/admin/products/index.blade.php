@@ -47,12 +47,13 @@
         <table class="table table-hover table-sm mb-0 align-middle">
             <thead class="table-light">
                 <tr>
+                    <th></th>
                     <th>Stok</th>
                     <th>Ürün</th>
                     <th>Maliyet</th>
                     <th>XML Kar %</th>
                     <th>Bayi Fiyatı</th>
-                    <th>Stok</th>
+                    <th>Mevcut Stok</th>
                     <th>Vitrin</th>
                     <th>Durum</th>
                     <th></th>
@@ -61,6 +62,15 @@
             <tbody>
             @foreach($products as $p)
                 <tr>
+                    <td>
+                        @if($p->images && is_array($p->images) && count($p->images) > 0)
+                            <img src="{{ $p->images[0] }}" alt="" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;">
+                        @else
+                            <div style="width: 50px; height: 50px; background: #e9ecef; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+                                <i class="bi bi-image text-muted"></i>
+                            </div>
+                        @endif
+                    </td>
                     <td><code class="small">{{ $p->stock_code }}</code></td>
                     <td>
                         <div class="fw-semibold" style="max-width:260px">{{ Str::limit($p->title, 45) }}</div>
