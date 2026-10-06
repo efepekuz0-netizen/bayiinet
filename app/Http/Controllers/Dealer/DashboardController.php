@@ -9,6 +9,14 @@ use App\Models\Product;
 
 class DashboardController extends Controller
 {
+    public function account()
+    {
+        $dealer = auth()->user()->dealer;
+        $recentOrders = Order::where('dealer_id', $dealer->id)->latest()->take(10)->get();
+
+        return view('dealer.account', compact('dealer', 'recentOrders'));
+    }
+
     public function index()
     {
         $dealer = auth()->user()->dealer;

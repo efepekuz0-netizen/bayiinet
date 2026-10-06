@@ -82,6 +82,10 @@
                 <a href="{{ route('admin.settings.index') }}" class="{{ request()->routeIs('admin.settings.*') ? 'active' : '' }}"><i class="bi bi-sliders me-2"></i> Ayarlar</a>
             @else
                 @if(auth()->user()->dealer?->isActive())
+                    <a href="{{ route('home') }}"><i class="bi bi-house me-2"></i> Ana Sayfa</a>
+                    <a href="{{ route('dealer.account') }}" class="{{ request()->routeIs('dealer.account') ? 'active' : '' }}">
+                        <i class="bi bi-person me-2"></i> Hesabım
+                    </a>
                     <a href="{{ route('dealer.dashboard') }}" class="{{ request()->routeIs('dealer.dashboard') ? 'active' : '' }}">
                         <i class="bi bi-speedometer2 me-2"></i> Dashboard
                     </a>

@@ -72,6 +72,16 @@
         </div>
     </div>
 </nav>
+@if(auth()->check() && auth()->user()->isDealer() && auth()->user()->dealer?->isActive())
+<div class="border-bottom bg-white">
+    <div class="container d-flex justify-content-center gap-4 py-2 small">
+        <a href="{{ route('home') }}" class="text-decoration-none {{ request()->routeIs('home') ? 'fw-bold text-primary' : 'text-secondary' }}"><i class="bi bi-house me-1"></i>Ana Sayfa</a>
+        <a href="#urunler" class="text-decoration-none text-secondary"><i class="bi bi-box-seam me-1"></i>Ürünler</a>
+        <a href="{{ route('dealer.orders.index') }}" class="text-decoration-none {{ request()->routeIs('dealer.orders.*') ? 'fw-bold text-primary' : 'text-secondary' }}"><i class="bi bi-receipt me-1"></i>Siparişler</a>
+        <a href="{{ route('dealer.account') }}" class="text-decoration-none {{ request()->routeIs('dealer.account') ? 'fw-bold text-primary' : 'text-secondary' }}"><i class="bi bi-person me-1"></i>Hesabım</a>
+    </div>
+</div>
+@endif
 
 <section class="hero">
     <div class="container">
@@ -170,5 +180,20 @@
     </div>
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<div class="dealer-bottom-nav d-md-none">
+    @auth
+        @if(auth()->user()->isDealer() && auth()->user()->dealer?->isActive())
+            <a href="{{ route('home') }}"><i class="bi bi-house"></i><span>Ana Sayfa</span></a>
+            <a href="#urunler"><i class="bi bi-box-seam"></i><span>Ürünler</span></a>
+            <a href="{{ route('dealer.orders.index') }}"><i class="bi bi-receipt"></i><span>Siparişler</span></a>
+            <a href="{{ route('dealer.account') }}"><i class="bi bi-person"></i><span>Hesabım</span></a>
+        @endif
+    @endauth
+</div>
+<style>
+.dealer-bottom-nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e2e8f0;z-index:1050;display:flex;justify-content:space-around;padding:.45rem 0 calc(.45rem + env(safe-area-inset-bottom));box-shadow:0 -3px 14px rgba(15,23,42,.08)}
+.dealer-bottom-nav a{color:#64748b;text-decoration:none;text-align:center;font-size:.7rem;display:flex;flex-direction:column;gap:.1rem}.dealer-bottom-nav i{font-size:1.1rem}.dealer-bottom-nav a:hover{color:#2563eb}
+@media(max-width:767px){body{padding-bottom:65px}}
+</style>
 </body>
 </html>
