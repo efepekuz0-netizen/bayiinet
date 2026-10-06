@@ -1,0 +1,28 @@
+#!/bin/sh
+# Render konteyneri başlangıç betiği
+cd /app || exit 1
+
+# APP_KEY girilmemişse geçici bir anahtar üret (oturumlar her yeniden başlatmada sıfırlanır)
+if [ -z "$APP_KEY" ]; then
+    echo "UYARI: APP_KEY tanimli degil, gecici anahtar uretiliyor. Render > Environment bolumune APP_KEY ekleyin."
+    APP_KEY="$(php artisan key:generate --show)"
+    export APP_KEY
+fi
+
+php artisan config:clear
+php artisan route:clear
+php artisan view:clear
+
+# Tabloları oluştur / güncelle. Başarısız olursa sebebi loglara yazılır, site yine de açılır.
+php artisan migrate --force || echo "UYARI: migrate basarisiz. DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD degerlerini kontrol edin."
+
+# ADMIN_EMAIL ve ADMIN_PASSWORD tanımlıysa ilk yönetici hesabını oluştur
+php artisan bayixml:ensure-admin || true
+
+# Kuyruk işçisi (Trendyol senkronu) ve zamanlayıcı (saatlik bayi XML yenileme) arka planda çalışsın
+php artisan queue:work marketplace --queue=marketplace --sleep=3 --tries=1 --timeout=3600 &
+php artisan schedule:work &
+
+# --no-reload: ortam değişkenlerinin (APP_KEY, DB_*) uygulamaya iletilmesi için şart
+export PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}"
+exec php artisan serve --host=0.0.0.0 --port="${PORT:-10000}" --no-reload
