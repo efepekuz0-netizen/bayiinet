@@ -17,14 +17,14 @@ class DatabaseSeeder extends Seeder
     {
         User::create([
             'name' => 'Admin',
-            'email' => 'admin@bayixml.test',
+            'email' => 'admin@bayiinet.test',
             'password' => Hash::make('password'),
             'role' => 'admin',
         ]);
 
         $dealerUser = User::create([
             'name' => 'Test Bayi',
-            'email' => 'bayi@bayixml.test',
+            'email' => 'bayi@bayiinet.test',
             'password' => Hash::make('password'),
             'role' => 'dealer',
         ]);
@@ -124,11 +124,11 @@ class DatabaseSeeder extends Seeder
 
         PlatformSetting::write('critical_stock_threshold', '5');
         PlatformSetting::write('default_margin_percent', '25');
-        PlatformSetting::write('company_name', 'BayiXML');
+        PlatformSetting::write('company_name', 'Bayiinet');
 
         $this->command->info('Seed tamamlandi!');
-        $this->command->info('Admin: admin@bayixml.test / password');
-        $this->command->info('Bayi:  bayi@bayixml.test / password');
+        $this->command->info('Admin: admin@bayiinet.test / password');
+        $this->command->info('Bayi:  bayi@bayiinet.test / password');
         $this->command->info('Bayi XML: /xml/'.$dealer->xml_token.'.xml');
     }
 }
