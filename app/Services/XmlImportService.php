@@ -266,7 +266,9 @@ class XmlImportService
             'list_price' => $this->xmlText($item, ['list_price', 'retail_price']) !== ''
                 ? (float) str_replace(',', '.', $this->xmlText($item, ['list_price', 'retail_price']))
                 : null,
-            'tax_rate' => (float) $this->xmlText($item, ['tax', 'tax_rate', 'TaxRate.rate'], (string) app(PricingService::class)->defaultXmlTaxRate()),
+            'tax_rate' => $source->tax_rate !== null
+                ? (float) $source->tax_rate
+                : (float) $this->xmlText($item, ['tax', 'tax_rate', 'TaxRate.rate'], (string) app(PricingService::class)->defaultXmlTaxRate()),
             'desi' => (float) $this->xmlText($item, ['desi', 'Volume'], '1'),
             'stock' => $stock,
             'has_variants' => count($variantData) > 0,

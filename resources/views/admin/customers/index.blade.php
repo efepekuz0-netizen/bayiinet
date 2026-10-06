@@ -3,6 +3,7 @@
 @section('content')
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div><h4 class="mb-1">Müşteriler</h4><div class="text-muted small">Siparişlerdeki son müşteri ve teslimat kayıtları.</div></div>
+    <form class="d-flex gap-2"><input name="q" value="{{ request('q') }}" class="form-control form-control-sm" placeholder="Ad, telefon veya e-posta"><button class="btn btn-sm btn-primary">Ara</button></form>
 </div>
 <div class="card">
     <div class="table-responsive">

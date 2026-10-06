@@ -25,6 +25,37 @@ class SourceController extends Controller
         return view('admin.sources.create');
     }
 
+    public function edit(Source $source)
+    {
+        return view('admin.sources.edit', compact('source'));
+    }
+
+    public function update(Request $request, Source $source)
+    {
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'url' => 'nullable|url:http,https',
+            'priority' => 'required|integer|min:1|max:100',
+            'xml_margin_percent' => 'nullable|numeric|min:0|max:500',
+            'min_margin_percent' => 'nullable|numeric|min:0|max:500',
+            'tax_rate' => 'nullable|numeric|min:0|max:100',
+            'prices_include_tax' => 'nullable|boolean',
+        ]);
+        $data['prices_include_tax'] = $request->boolean('prices_include_tax');
+        $source->update($data);
+
+        if ($request->boolean('recalculate')) {
+            app(\App\Services\PricingService::class)->bulkApplyXmlMargin(
+                (float) ($source->xml_margin_percent ?? app(\App\Services\PricingService::class)->defaultXmlMargin()),
+                true,
+                $source->id,
+            );
+        }
+
+        \Illuminate\Support\Facades\Cache::forget('xml_feed_catalog');
+        return redirect()->route('admin.sources.index')->with('success', 'Kaynak ayarları güncellendi.');
+    }
+
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -32,11 +63,16 @@ class SourceController extends Controller
             'type' => 'required|in:file,url',
             'url' => 'exclude_unless:type,url|required|url:http,https',
             'priority' => 'nullable|integer|min:1|max:100',
+            'xml_margin_percent' => 'nullable|numeric|min:0|max:500',
+            'min_margin_percent' => 'nullable|numeric|min:0|max:500',
+            'tax_rate' => 'nullable|numeric|min:0|max:100',
+            'prices_include_tax' => 'nullable|boolean',
         ]);
 
         $data['slug'] = Str::slug($data['name']).'-'.Str::random(4);
         $data['is_active'] = true;
         $data['priority'] = $data['priority'] ?? 10;
+        $data['prices_include_tax'] = $request->boolean('prices_include_tax');
 
         Source::create($data);
 

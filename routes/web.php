@@ -41,7 +41,9 @@ Route::middleware(['auth', 'admin'])
 
         Route::get('/kaynaklar', [AdminSourceController::class, 'index'])->name('sources.index');
         Route::get('/kaynaklar/yeni', [AdminSourceController::class, 'create'])->name('sources.create');
+        Route::get('/kaynaklar/{source}/duzenle', [AdminSourceController::class, 'edit'])->name('sources.edit');
         Route::post('/kaynaklar', [AdminSourceController::class, 'store'])->name('sources.store');
+        Route::put('/kaynaklar/{source}', [AdminSourceController::class, 'update'])->name('sources.update');
         Route::post('/kaynaklar/{source}/xml', [AdminSourceController::class, 'upload'])->name('sources.upload');
         Route::post('/kaynaklar/{source}/guncelle', [AdminSourceController::class, 'refresh'])->name('sources.refresh');
         Route::delete('/kaynaklar/{source}', [AdminSourceController::class, 'destroy'])->name('sources.destroy');
@@ -107,7 +109,6 @@ Route::middleware(['auth', 'dealer'])
     ->name('dealer.')
     ->group(function () {
         Route::get('/', [DealerDashboardController::class, 'index'])->name('dashboard');
-        Route::get('/hesabim', [DealerDashboardController::class, 'account'])->name('account');
         Route::get('/urunler', [DealerProductController::class, 'index'])->name('products.index');
         Route::get('/siparisler', [DealerOrderController::class, 'index'])->name('orders.index');
         Route::get('/siparisler/yeni', [DealerOrderController::class, 'create'])->name('orders.create');

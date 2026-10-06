@@ -19,13 +19,21 @@ use Illuminate\Validation\Rule;
 
 class OperationsController extends Controller
 {
-    public function customers()
+    public function customers(Request $request)
     {
-        $customers = Order::query()
+        $query = Order::query();
+        if ($search = trim((string) $request->get('q'))) {
+            $query->where(function ($q) use ($search) {
+                $q->where('customer_name', 'like', "%{$search}%")
+                    ->orWhere('customer_phone', 'like', "%{$search}%")
+                    ->orWhere('customer_email', 'like', "%{$search}%");
+            });
+        }
+        $customers = $query
             ->selectRaw('customer_name, customer_phone, customer_email, customer_city, count(*) as order_count, sum(total) as total_spent, max(created_at) as last_order_at')
             ->groupBy('customer_name', 'customer_phone', 'customer_email', 'customer_city')
             ->latest('last_order_at')
-            ->paginate(30);
+            ->paginate(30)->withQueryString();
 
         return view('admin.customers.index', compact('customers'));
     }

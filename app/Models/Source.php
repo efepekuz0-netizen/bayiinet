@@ -14,6 +14,7 @@ class Source extends Model
         'url',
         'file_path',
         'mapping',
+        'xml_margin_percent', 'min_margin_percent', 'tax_rate', 'prices_include_tax',
         'is_active',
         'priority',
         'last_imported_at',
@@ -23,6 +24,10 @@ class Source extends Model
 
     protected $casts = [
         'mapping' => 'array',
+        'xml_margin_percent' => 'decimal:2',
+        'min_margin_percent' => 'decimal:2',
+        'tax_rate' => 'decimal:2',
+        'prices_include_tax' => 'boolean',
         'is_active' => 'boolean',
         'priority' => 'integer',
         'last_imported_at' => 'datetime',

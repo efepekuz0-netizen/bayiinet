@@ -31,8 +31,10 @@
                     <td>{{ $source->type === 'url' ? 'Bağlantı' : 'Dosya' }}</td>
                     <td class="text-break" style="max-width:260px">{{ $source->url ?? '-' }}</td>
                     <td>{{ $source->products_count }}</td>
+                    <td><span class="badge text-bg-light">Kâr %{{ number_format($source->xml_margin_percent ?? 0, 1) }}</span> <span class="badge text-bg-light">KDV %{{ number_format($source->tax_rate ?? 0, 1) }}</span></td>
                     <td>{{ $source->last_imported_at?->diffForHumans() ?? '-' }}</td>
                     <td>
+                        <a href="{{ route('admin.sources.edit', $source) }}" class="btn btn-sm btn-outline-secondary">Ayarlar</a>
                         @if($source->is_active)
                             <span class="badge bg-success">Aktif</span>
                         @else
