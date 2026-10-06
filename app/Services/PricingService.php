@@ -61,6 +61,9 @@ class PricingService
     public function bulkApplyXmlMargin(float $marginPercent): int
     {
         $count = 0;
+        $total = Product::query()->count();
+        \Log::info("Starting bulk apply for margin: {$marginPercent}, total products: {$total}");
+        
         Product::query()->chunkById(100, function ($products) use ($marginPercent, &$count) {
             foreach ($products as $product) {
                 $this->applyToProduct($product, $marginPercent);
@@ -69,6 +72,7 @@ class PricingService
         });
 
         PlatformSetting::write('xml_margin_percent', $marginPercent);
+        \Log::info("Bulk apply completed, updated {$count} products");
 
         return $count;
     }
