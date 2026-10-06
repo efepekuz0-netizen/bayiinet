@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BayiXML — XML Bayilik & Stoksuz E-Ticaret</title>
+    <title>Bayiinet — XML Bayilik & Stoksuz E-Ticaret</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
@@ -45,13 +45,13 @@
 <div class="topbar">
     <div class="container d-flex justify-content-between">
         <span><i class="bi bi-truck me-1"></i> Stoksuz satış · XML ile otomatik güncelleme · Aynı gün kargo desteği</span>
-        <span class="d-none d-md-inline">Destek: destek@bayixml.com</span>
+        <span class="d-none d-md-inline">Destek: destek@bayiinet.com</span>
     </div>
 </div>
 
 <nav class="navbar-main py-3">
     <div class="container d-flex align-items-center justify-content-between gap-3">
-        <a href="{{ route('home') }}" class="logo">Bayi<span>XML</span></a>
+        <a href="{{ route('home') }}" class="logo">Bayi<span>inet</span></a>
         <form action="{{ route('home') }}" method="GET" class="flex-grow-1 mx-lg-4 d-none d-md-block" style="max-width:480px">
             <div class="input-group">
                 <input type="text" name="q" class="form-control" placeholder="Ürün, marka veya stok kodu ara..." value="{{ request('q') }}">
@@ -139,7 +139,7 @@
 </section>
 
 <section class="container pb-5">
-    <h2 class="section-title text-center mb-4">Neden BayiXML?</h2>
+    <h2 class="section-title text-center mb-4">Neden Bayiinet?</h2>
     <div class="row g-3">
         <div class="col-md-3"><div class="feature-box"><i class="bi bi-file-earmark-code"></i><h6 class="mt-2 fw-bold">Ücretsiz XML</h6><p class="text-muted small mb-0">Bayilik ve XML ücreti yok. Anlık stok-fiyat senkronu.</p></div></div>
         <div class="col-md-3"><div class="feature-box"><i class="bi bi-truck"></i><h6 class="mt-2 fw-bold">Siz sat, biz gönder</h6><p class="text-muted small mb-0">Siparişte etiket + ödeme; ürünü biz kargolarız.</p></div></div>
@@ -152,7 +152,7 @@
     <div class="container">
         <div class="row">
             <div class="col-md-4 mb-3">
-                <div class="logo text-white mb-2">Bayi<span>XML</span></div>
+                <div class="logo text-white mb-2">Bayi<span>inet</span></div>
                 <p class="small">XML bayilik ile stoksuz e-ticaret platformu.</p>
             </div>
             <div class="col-md-4 mb-3">
@@ -162,11 +162,11 @@
             </div>
             <div class="col-md-4 mb-3">
                 <h6 class="text-white">İletişim</h6>
-                <p class="small mb-0">destek@bayixml.com</p>
+                <p class="small mb-0">destek@bayiinet.com</p>
             </div>
         </div>
         <hr class="border-secondary">
-        <div class="small text-center">© {{ date('Y') }} BayiXML. Tüm hakları saklıdır.</div>
+        <div class="small text-center">© {{ date('Y') }} Bayiinet. Tüm hakları saklıdır.</div>
     </div>
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
