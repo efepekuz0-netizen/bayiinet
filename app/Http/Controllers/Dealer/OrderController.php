@@ -25,7 +25,7 @@ class OrderController extends Controller
         return view('dealer.orders.index', compact('orders'));
     }
 
-    public function create()
+    public function create(Request $request)
     {
         $products = Product::with('variants')
             ->where('is_active', true)
@@ -40,7 +40,16 @@ class OrderController extends Controller
             ->orderBy('title')
             ->get();
 
-        return view('dealer.orders.create', compact('products'));
+        $selectedProduct = null;
+        $selectedVariant = null;
+        if ($request->filled('product')) {
+            $selectedProduct = $products->firstWhere('id', (int) $request->integer('product'));
+            if ($selectedProduct && $request->filled('variant')) {
+                $selectedVariant = $selectedProduct->variants->firstWhere('id', (int) $request->integer('variant'));
+            }
+        }
+
+        return view('dealer.orders.create', compact('products', 'selectedProduct', 'selectedVariant'));
     }
 
     public function store(Request $request)
@@ -172,14 +181,6 @@ class OrderController extends Controller
             }
 
             $totalCents = $subtotalCents;
-            $balanceCents = (int) round((float) $lockedDealer->balance * 100);
-
-            if ($balanceCents < $totalCents) {
-                throw ValidationException::withMessages([
-                    'balance' => 'Bakiyeniz yetersiz. Lütfen yöneticiyle iletişime geçin.',
-                ]);
-            }
-
             $subtotal = number_format($subtotalCents / 100, 2, '.', '');
             $total = number_format($totalCents / 100, 2, '.', '');
             $order = Order::create([
@@ -193,9 +194,9 @@ class OrderController extends Controller
                 'subtotal' => $subtotal,
                 'shipping_cost' => 0,
                 'total' => $total,
-                'status' => 'paid',
+                'status' => 'pending',
                 'dealer_note' => $data['dealer_note'] ?? null,
-                'paid_at' => now(),
+                'paid_at' => null,
             ]);
 
             foreach ($orderItems as $oi) {
@@ -203,25 +204,14 @@ class OrderController extends Controller
                 OrderItem::create($oi);
             }
 
-            $newBalance = number_format(($balanceCents - $totalCents) / 100, 2, '.', '');
-            $lockedDealer->update(['balance' => $newBalance]);
-
-            BalanceTransaction::create([
-                'dealer_id' => $lockedDealer->id,
-                'order_id' => $order->id,
-                'type' => 'order_payment',
-                'amount' => -$total,
-                'balance_after' => $newBalance,
-                'description' => 'Sipariş ödemesi: '.$order->order_number,
-            ]);
 
             return $order;
         });
 
         Cache::forget('xml_feed_catalog');
 
-        return redirect()->route('dealer.orders.index')
-            ->with('success', 'Sipariş başarıyla oluşturuldu!');
+        return redirect()->route('dealer.orders.show', $order)
+            ->with('success', 'Sipariş oluşturuldu. Kargo takip numarası ve PDF bilgilerini gönderdiğinizde bakiye düşülecektir.');
     }
 
     public function show(Order $order)
@@ -259,7 +249,30 @@ class OrderController extends Controller
             $updates['payment_proof_path'] = $request->file('payment_proof')->store('payment-proofs', 'local');
         }
 
-        $order->update($updates);
+        DB::transaction(function () use ($order, $updates): void {
+            $lockedOrder = Order::query()->lockForUpdate()->with('dealer')->findOrFail($order->id);
+            if ($lockedOrder->status === 'pending') {
+                $dealer = Dealer::query()->lockForUpdate()->findOrFail($lockedOrder->dealer_id);
+                $totalCents = (int) round((float) $lockedOrder->total * 100);
+                $balanceCents = (int) round((float) $dealer->balance * 100);
+                if ($balanceCents < $totalCents) {
+                    throw ValidationException::withMessages(['balance' => 'Bakiyeniz yetersiz. Kargo bilgisi kaydedilmedi.']);
+                }
+                $newBalance = number_format(($balanceCents - $totalCents) / 100, 2, '.', '');
+                $dealer->update(['balance' => $newBalance]);
+                $lockedOrder->update(array_merge($updates, ['status' => 'preparing', 'paid_at' => now()]));
+                BalanceTransaction::create([
+                    'dealer_id' => $dealer->id,
+                    'order_id' => $lockedOrder->id,
+                    'type' => 'order_payment',
+                    'amount' => '-'.$lockedOrder->total,
+                    'balance_after' => $newBalance,
+                    'description' => 'Sipariş ödemesi: '.$lockedOrder->order_number,
+                ]);
+            } else {
+                $lockedOrder->update($updates);
+            }
+        });
 
         return back()->with('success', 'Kargo bilgileri iletildi. Siparişiniz işleme alınacak.');
     }

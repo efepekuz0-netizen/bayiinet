@@ -63,7 +63,7 @@
                 @if(auth()->user()->isAdmin())
                     <a href="{{ route('admin.dashboard') }}" class="btn btn-outline-primary btn-sm">Admin Panel</a>
                 @else
-                    <a href="{{ route('dealer.dashboard') }}" class="btn btn-outline-primary btn-sm">Bayi Panel</a>
+                    <a href="{{ route('home') }}" class="btn btn-outline-primary btn-sm">Ürünlere dön</a>
                 @endif
             @else
                 <a href="{{ route('login') }}" class="btn btn-outline-secondary btn-sm">Giriş</a>

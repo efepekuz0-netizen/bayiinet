@@ -33,7 +33,7 @@ class AuthController extends Controller
             }
 
             return $user->dealer?->isActive()
-                ? redirect()->route('dealer.dashboard')
+                ? redirect()->intended(route('home'))
                 : redirect()->route('dealer.application');
         }
 

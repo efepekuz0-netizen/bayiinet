@@ -57,13 +57,18 @@ class HomeController extends Controller
 
     public function product(Product $product)
     {
-        abort_unless($product->is_active && $product->show_on_homepage, 404);
+        abort_unless($product->is_active, 404);
         $product->load('variants');
 
         $related = Product::query()
             ->where('is_active', true)
             ->where('id', '!=', $product->id)
+            ->where('show_on_homepage', true)
             ->where('main_category', $product->main_category)
+            ->where(function ($q) {
+                $q->where('stock', '>', 0)
+                    ->orWhereHas('variants', fn ($v) => $v->where('stock', '>', 0));
+            })
             ->take(4)
             ->get();
 

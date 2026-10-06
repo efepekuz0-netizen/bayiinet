@@ -4,7 +4,7 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
         <h4 class="mb-1">Yeni Sipariş</h4>
-        <div class="text-muted small">Ürünler stok ve bayi bakiyesi kontrol edilerek sipariş edilir.</div>
+        <div class="text-muted small">Ürün seçin, müşteri teslimat bilgilerini girin. Tutar sipariş oluşturulunca bayi bakiyenizden düşülür.</div>
     </div>
 </div>
 
@@ -73,10 +73,10 @@
                                         @foreach($products as $product)
                                             @if($product->has_variants)
                                                 @foreach($product->variants->where('stock', '>', 0) as $variant)
-                                                    <option value="{{ $product->id }}" data-variant-id="{{ $variant->id }}" data-price="{{ (float) $product->price + (float) $variant->price_diff }}" data-stock="{{ $variant->stock }}">{{ $product->title }} — {{ $variant->full_name }} · {{ number_format((float) $product->price + (float) $variant->price_diff, 2) }} ₺ · Stok: {{ $variant->stock }}</option>
+                                                    <option @selected($selectedProduct?->id === $product->id && $selectedVariant?->id === $variant->id) value="{{ $product->id }}" data-variant-id="{{ $variant->id }}" data-price="{{ (float) $product->price + (float) $variant->price_diff }}" data-stock="{{ $variant->stock }}">{{ $product->title }} — {{ $variant->full_name }} · {{ number_format((float) $product->price + (float) $variant->price_diff, 2) }} ₺ · Stok: {{ $variant->stock }}</option>
                                                 @endforeach
                                             @elseif($product->stock > 0)
-                                                <option value="{{ $product->id }}" data-price="{{ $product->price }}" data-stock="{{ $product->stock }}">{{ $product->title }} · {{ number_format($product->price, 2) }} ₺ · Stok: {{ $product->stock }}</option>
+                                                <option @selected($selectedProduct?->id === $product->id && ! $selectedVariant) value="{{ $product->id }}" data-price="{{ $product->price }}" data-stock="{{ $product->stock }}">{{ $product->title }} · {{ number_format($product->price, 2) }} ₺ · Stok: {{ $product->stock }}</option>
                                             @endif
                                         @endforeach
                                     </select>
