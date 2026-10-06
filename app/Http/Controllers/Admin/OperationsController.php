@@ -151,6 +151,9 @@ class OperationsController extends Controller
             'apply_to_all' => 'nullable|boolean',
         ]);
 
+        \Log::info('Pricing update request', $data);
+        \Log::info('apply_to_all value: ' . ($request->boolean('apply_to_all') ? 'true' : 'false'));
+
         PlatformSetting::write('xml_margin_percent', $data['xml_margin_percent']);
         PlatformSetting::write('min_margin_percent', $data['min_margin_percent']);
         PlatformSetting::write('default_marketplace_margin', $data['default_marketplace_margin']);
