@@ -22,16 +22,30 @@ class PricingService
         return (float) PlatformSetting::read('default_marketplace_margin', '20');
     }
 
+    public function defaultXmlTaxRate(): float
+    {
+        return (float) PlatformSetting::read('xml_tax_rate', '20');
+    }
+
+    public function xmlPricesIncludeTax(): bool
+    {
+        return PlatformSetting::read('xml_prices_include_tax', '0') === '1';
+    }
+
     /**
      * cost_price (XML alış) üzerinden admin satış fiyatını hesapla.
      */
-    public function calculateSellPrice(float $costPrice, ?float $xmlMargin = null, ?float $minMargin = null): float
+    public function calculateSellPrice(float $costPrice, ?float $xmlMargin = null, ?float $minMargin = null, ?float $taxRate = null): float
     {
         $margin = $xmlMargin ?? $this->defaultXmlMargin();
         $min = $minMargin ?? $this->defaultMinMargin();
         $margin = max($margin, $min);
+        $tax = max(0, $taxRate ?? $this->defaultXmlTaxRate());
+        $netCost = $this->xmlPricesIncludeTax() && $tax > 0
+            ? $costPrice / (1 + ($tax / 100))
+            : $costPrice;
 
-        return round($costPrice * (1 + ($margin / 100)), 2);
+        return round($netCost * (1 + ($margin / 100)) * (1 + ($tax / 100)), 2);
     }
 
     /**
@@ -50,7 +64,8 @@ class PricingService
 
         $product->cost_price = $cost;
         $product->xml_margin_percent = max($margin, $min);
-        $product->sell_price = $this->calculateSellPrice($cost, $product->xml_margin_percent, $min);
+        $product->tax_rate = $product->tax_rate ?? $this->defaultXmlTaxRate();
+        $product->sell_price = $this->calculateSellPrice($cost, $product->xml_margin_percent, $min, (float) $product->tax_rate);
         // Geriye uyumluluk: price = bayilere görünen fiyat
         $product->price = $product->sell_price;
         $product->save();
@@ -58,21 +73,20 @@ class PricingService
         return $product;
     }
 
-    public function bulkApplyXmlMargin(float $marginPercent): int
+    public function bulkApplyXmlMargin(float $marginPercent, bool $overrideTax = false): int
     {
         $count = 0;
-        $total = Product::query()->count();
-        \Log::info("Starting bulk apply for margin: {$marginPercent}, total products: {$total}");
-        
-        Product::query()->chunkById(100, function ($products) use ($marginPercent, &$count) {
+        Product::query()->chunkById(100, function ($products) use ($marginPercent, $overrideTax, &$count) {
             foreach ($products as $product) {
+                if ($overrideTax) {
+                    $product->tax_rate = $this->defaultXmlTaxRate();
+                }
                 $this->applyToProduct($product, $marginPercent);
                 $count++;
             }
         });
 
         PlatformSetting::write('xml_margin_percent', $marginPercent);
-        \Log::info("Bulk apply completed, updated {$count} products");
 
         return $count;
     }

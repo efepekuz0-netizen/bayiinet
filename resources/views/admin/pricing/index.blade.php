@@ -58,6 +58,17 @@
                         <label class="form-check-label" for="applyAll">Tüm ürünlere uygula</label>
                     </div>
                 </div>
+                <div class="col-md-3">
+                    <label class="form-label">XML KDV %</label>
+                    <input type="number" step="0.1" min="0" max="100" name="xml_tax_rate" class="form-control" value="{{ $settings['xml_tax_rate'] }}" required>
+                    <div class="form-text">XML'de KDV alanı yoksa kullanılacak oran.</div>
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        <input type="checkbox" name="xml_prices_include_tax" value="1" class="form-check-input" id="xmlPricesIncludeTax" @checked($settings['xml_prices_include_tax'] === '1')>
+                        <label class="form-check-label" for="xmlPricesIncludeTax">XML alış fiyatı KDV dahil</label>
+                    </div>
+                </div>
             </div>
             <button class="btn btn-primary mt-3">
                 <i class="bi bi-check2-circle me-1"></i> Kaydet & Uygula
@@ -76,13 +87,12 @@
                 @php
                     $cost = $p->cost_price ?? $p->price;
                     $sell = $p->sell_price ?? $p->price;
-                    $margin = $p->xml_margin_percent ?? $settings['xml_margin_percent'];
-                    $retail = round($sell * (1 + ($settings['default_marketplace_margin'] / 100)), 2);
+                    $retail = round($sell * 1.20, 2);
                 @endphp
                 <tr>
                     <td>{{ Str::limit($p->title, 40) }}</td>
                     <td>{{ number_format($cost, 2) }} ₺</td>
-                    <td>%{{ number_format($margin, 1) }}</td>
+                    <td>%{{ number_format($p->xml_margin_percent ?? 0, 1) }}</td>
                     <td class="fw-bold">{{ number_format($sell, 2) }} ₺</td>
                     <td class="text-success">{{ number_format($retail, 2) }} ₺</td>
                 </tr>

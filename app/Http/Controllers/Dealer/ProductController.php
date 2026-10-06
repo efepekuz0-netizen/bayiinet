@@ -11,12 +11,20 @@ class ProductController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Product::with('variants')->where('is_active', true)->latest();
+        $query = Product::with('variants')
+            ->where('is_active', true)
+            ->where(function ($q) {
+                $q->where('stock', '>', 0)
+                    ->orWhereHas('variants', fn ($variants) => $variants->where('stock', '>', 0));
+            })
+            ->latest('last_synced_at');
 
         if ($search = $request->get('q')) {
             $query->where(function ($q) use ($search) {
                 $q->where('title', 'like', "%{$search}%")
-                    ->orWhere('stock_code', 'like', "%{$search}%");
+                    ->orWhere('stock_code', 'like', "%{$search}%")
+                    ->orWhere('barcode', 'like', "%{$search}%")
+                    ->orWhere('brand', 'like', "%{$search}%");
             });
         }
 

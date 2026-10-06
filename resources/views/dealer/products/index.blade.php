@@ -10,6 +10,13 @@
 </div>
 
 <div class="row g-3">
+@if($products->isEmpty())
+    <div class="col-12">
+        <div class="alert alert-info mb-0">
+            Aramanıza uygun veya stokta bulunan ürün bulunamadı. Farklı bir ürün adı, marka, barkod ya da stok kodu deneyin.
+        </div>
+    </div>
+@endif
 @foreach($products as $p)
     <div class="col-md-3">
         <div class="card h-100">

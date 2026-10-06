@@ -266,7 +266,7 @@ class XmlImportService
             'list_price' => $this->xmlText($item, ['list_price', 'retail_price']) !== ''
                 ? (float) str_replace(',', '.', $this->xmlText($item, ['list_price', 'retail_price']))
                 : null,
-            'tax_rate' => (int) $this->xmlText($item, ['tax', 'TaxRate.rate'], '10'),
+            'tax_rate' => (float) $this->xmlText($item, ['tax', 'tax_rate', 'TaxRate.rate'], (string) app(PricingService::class)->defaultXmlTaxRate()),
             'desi' => (float) $this->xmlText($item, ['desi', 'Volume'], '1'),
             'stock' => $stock,
             'has_variants' => count($variantData) > 0,
@@ -336,6 +336,7 @@ class XmlImportService
                 'sub_category',
                 'category_path',
                 'price',
+                'cost_price',
                 'list_price',
                 'tax_rate',
                 'desi',
@@ -376,6 +377,11 @@ class XmlImportService
         if ($variants !== []) {
             ProductVariant::query()->insert($variants);
         }
+
+        $pricing = app(PricingService::class);
+        Product::query()->whereIn('id', $productIds)->each(function (Product $product) use ($pricing): void {
+            $pricing->applyToProduct($product);
+        });
     }
 
     protected function xmlText(\SimpleXMLElement $item, array $paths, string $default = ''): string

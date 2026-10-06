@@ -48,7 +48,12 @@ class HomeController extends Controller
         $featured = Product::query()
             ->where('is_active', true)
             ->where('is_featured', true)
-            ->where('stock', '>', 0)
+            ->where(function ($q) {
+                $q->where('stock', '>', 0)
+                    ->orWhereHas('variants', fn ($v) => $v->where('stock', '>', 0));
+            })
+            ->with('variants')
+            ->latest('last_synced_at')
             ->take(8)
             ->get();
 
@@ -57,18 +62,13 @@ class HomeController extends Controller
 
     public function product(Product $product)
     {
-        abort_unless($product->is_active, 404);
+        abort_unless($product->is_active && $product->show_on_homepage, 404);
         $product->load('variants');
 
         $related = Product::query()
             ->where('is_active', true)
             ->where('id', '!=', $product->id)
-            ->where('show_on_homepage', true)
             ->where('main_category', $product->main_category)
-            ->where(function ($q) {
-                $q->where('stock', '>', 0)
-                    ->orWhereHas('variants', fn ($v) => $v->where('stock', '>', 0));
-            })
             ->take(4)
             ->get();
 

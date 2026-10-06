@@ -136,6 +136,8 @@ class OperationsController extends Controller
             'xml_margin_percent' => PlatformSetting::read('xml_margin_percent', '15'),
             'min_margin_percent' => PlatformSetting::read('min_margin_percent', '5'),
             'default_marketplace_margin' => PlatformSetting::read('default_marketplace_margin', '20'),
+            'xml_tax_rate' => PlatformSetting::read('xml_tax_rate', '20'),
+            'xml_prices_include_tax' => PlatformSetting::read('xml_prices_include_tax', '0'),
         ];
         $products = Product::query()->where('is_active', true)->latest()->paginate(30);
 
@@ -148,20 +150,21 @@ class OperationsController extends Controller
             'xml_margin_percent' => 'required|numeric|min:0|max:500',
             'min_margin_percent' => 'required|numeric|min:0|max:500',
             'default_marketplace_margin' => 'required|numeric|min:0|max:500',
+            'xml_tax_rate' => 'required|numeric|min:0|max:100',
+            'xml_prices_include_tax' => 'nullable|boolean',
             'apply_to_all' => 'nullable|boolean',
         ]);
-
-        \Log::info('Pricing update request', $data);
-        \Log::info('apply_to_all value: ' . ($request->boolean('apply_to_all') ? 'true' : 'false'));
 
         PlatformSetting::write('xml_margin_percent', $data['xml_margin_percent']);
         PlatformSetting::write('min_margin_percent', $data['min_margin_percent']);
         PlatformSetting::write('default_marketplace_margin', $data['default_marketplace_margin']);
+        PlatformSetting::write('xml_tax_rate', $data['xml_tax_rate']);
+        PlatformSetting::write('xml_prices_include_tax', $request->boolean('xml_prices_include_tax') ? '1' : '0');
 
         $msg = 'Kar oranları kaydedildi.';
 
         if ($request->boolean('apply_to_all')) {
-            $count = app(\App\Services\PricingService::class)->bulkApplyXmlMargin((float) $data['xml_margin_percent']);
+            $count = app(\App\Services\PricingService::class)->bulkApplyXmlMargin((float) $data['xml_margin_percent'], true);
             $msg .= " {$count} ürüne uygulandı.";
         }
 
@@ -177,6 +180,8 @@ class OperationsController extends Controller
             'xml_margin_percent' => 'nullable|numeric|min:0|max:500',
             'min_margin_percent' => 'nullable|numeric|min:0|max:500',
             'default_marketplace_margin' => 'nullable|numeric|min:0|max:500',
+            'xml_tax_rate' => 'nullable|numeric|min:0|max:100',
+            'xml_prices_include_tax' => 'nullable|boolean',
             'company_name' => 'nullable|string|max:255',
         ]);
 
@@ -185,6 +190,12 @@ class OperationsController extends Controller
                 PlatformSetting::write($key, $value);
             }
         }
+
+        PlatformSetting::write('xml_prices_include_tax', $request->boolean('xml_prices_include_tax') ? '1' : '0');
+        if (array_key_exists('xml_margin_percent', $data) && $data['xml_margin_percent'] !== null) {
+            app(\App\Services\PricingService::class)->bulkApplyXmlMargin((float) $data['xml_margin_percent'], array_key_exists('xml_tax_rate', $data));
+        }
+        Cache::forget('xml_feed_catalog');
 
         return back()->with('success', 'Panel ayarları kaydedildi.');
     }
@@ -197,6 +208,8 @@ class OperationsController extends Controller
             'min_margin_percent' => PlatformSetting::read('min_margin_percent', '5'),
             'default_marketplace_margin' => PlatformSetting::read('default_marketplace_margin', '20'),
             'company_name' => PlatformSetting::read('company_name', 'BayiXML'),
+            'xml_tax_rate' => PlatformSetting::read('xml_tax_rate', '20'),
+            'xml_prices_include_tax' => PlatformSetting::read('xml_prices_include_tax', '0'),
         ];
 
         return view('admin.settings.index', compact('settings'));

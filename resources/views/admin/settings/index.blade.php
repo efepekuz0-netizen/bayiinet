@@ -10,6 +10,12 @@
                 <form method="POST" action="{{ route('admin.settings.update') }}">
                     @csrf @method('PUT')
                     <div class="mb-3"><label class="form-label">Kritik stok eşiği</label><input type="number" name="critical_stock_threshold" class="form-control" min="0" max="100000" value="{{ $settings['critical_stock_threshold'] }}" required><div class="form-text">Ürün veya varyant stoğu bu sayı ve altına düşünce kritik stok ekranında görünür.</div></div>
+                    <div class="row g-3">
+                        <div class="col-md-6"><label class="form-label">XML kâr oranı (%)</label><input type="number" step="0.1" name="xml_margin_percent" class="form-control" min="0" max="500" value="{{ $settings['xml_margin_percent'] }}"></div>
+                        <div class="col-md-6"><label class="form-label">XML KDV oranı (%)</label><input type="number" step="0.1" name="xml_tax_rate" class="form-control" min="0" max="100" value="{{ $settings['xml_tax_rate'] }}"></div>
+                    </div>
+                    <div class="form-check mt-3 mb-3"><input type="checkbox" name="xml_prices_include_tax" value="1" class="form-check-input" id="settingsXmlVat" @checked($settings['xml_prices_include_tax'] === '1')><label class="form-check-label" for="settingsXmlVat">XML alış fiyatları KDV dahil</label></div>
+                    <div class="form-text mb-3">Kaydettiğiniz XML kâr oranı mevcut ürünlere de yeniden uygulanır. XML'deki ürün tax alanı varsa ürünün kendi oranı korunur, boşsa burada belirlediğiniz oran kullanılır.</div>
                     <button class="btn btn-primary">Ayarları kaydet</button>
                 </form>
                 <hr>
