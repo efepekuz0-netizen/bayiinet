@@ -11,6 +11,20 @@
     <div class="col-md-4"><div class="card stat-card orange p-3"><div class="small text-muted">KUYRUK DURUMU</div><div class="fs-5 fw-bold">Eşzamanlı aktarım</div><div class="small text-muted">XML şu an panel isteği sırasında işleniyor.</div></div></div>
 </div>
 <div class="card mb-3">
+    <div class="card-header bg-white fw-semibold">Laravel Log Dosyası (Son 50 satır)</div>
+    <div class="card-body">
+        <pre class="bg-dark text-light p-3 rounded" style="max-height: 400px; overflow-y: auto; font-size: 12px;">@php
+    $logFile = storage_path('logs/laravel.log');
+    if (file_exists($logFile)) {
+        $lines = array_slice(file($logFile), -50);
+        echo implode('', $lines);
+    } else {
+        echo 'Log dosyası bulunamadı.';
+    }
+@endphp</pre>
+    </div>
+</div>
+<div class="card mb-3">
     <div class="card-header bg-white fw-semibold">XML aktarım geçmişi</div>
     <div class="table-responsive">
         <table class="table align-middle mb-0">
