@@ -47,13 +47,12 @@
         <table class="table table-hover table-sm mb-0 align-middle">
             <thead class="table-light">
                 <tr>
-                    <th></th>
                     <th>Stok</th>
                     <th>Ürün</th>
                     <th>Maliyet</th>
                     <th>XML Kar %</th>
                     <th>Bayi Fiyatı</th>
-                    <th>Mevcut Stok</th>
+                    <th>Stok</th>
                     <th>Vitrin</th>
                     <th>Durum</th>
                     <th></th>
@@ -62,15 +61,6 @@
             <tbody>
             @foreach($products as $p)
                 <tr>
-                    <td>
-                        @if($p->images && is_array($p->images) && count($p->images) > 0)
-                            <img src="{{ $p->images[0] }}" alt="" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;">
-                        @else
-                            <div style="width: 50px; height: 50px; background: #e9ecef; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
-                                <i class="bi bi-image text-muted"></i>
-                            </div>
-                        @endif
-                    </td>
                     <td><code class="small">{{ $p->stock_code }}</code></td>
                     <td>
                         <div class="fw-semibold" style="max-width:260px">{{ Str::limit($p->title, 45) }}</div>
@@ -120,13 +110,27 @@
             <div class="modal-body">
                 <p class="text-muted small">Bu oran <strong>sizin karınız</strong>dır. XML alış fiyatı üzerine eklenir; çıkan fiyat bayilere ve anasayfaya yansır.</p>
                 <label class="form-label">XML Kar Oranı (%)</label>
-                <input type="number" step="0.1" min="0" name="xml_margin_percent" class="form-control" value="15" required>
+                <input type="number" step="0.1" min="0" max="500" name="xml_margin_percent" class="form-control" value="{{ old('xml_margin_percent', app(\App\Services\PricingService::class)->defaultXmlMargin()) }}" required>
+                @error('xml_margin_percent')<div class="text-danger small mt-2">{{ $message }}</div>@enderror
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-light" data-bs-dismiss="modal">İptal</button>
-                <button class="btn btn-primary">Tüm Ürünlere Uygula</button>
+                <button class="btn btn-primary" type="submit" id="applyMarginButton">Tüm Ürünlere Uygula</button>
             </div>
         </form>
     </div>
 </div>
+@if(session('error') && old('xml_margin_percent'))
+@push('scripts')<script>document.addEventListener('DOMContentLoaded',()=>{const el=document.getElementById('marginModal'); if(el && window.bootstrap) bootstrap.Modal.getOrCreateInstance(el).show();});</script>@endpush
+@endif
 @endsection
+@push('scripts')
+<script>
+document.querySelector('#marginModal form')?.addEventListener('submit', function () {
+    const button = document.getElementById('applyMarginButton');
+    if (!button) return;
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Ürünler güncelleniyor...';
+});
+</script>
+@endpush

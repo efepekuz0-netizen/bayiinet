@@ -8,29 +8,41 @@ use App\Models\Source;
 
 class PricingService
 {
+    private ?array $defaults = null;
+
+    private function defaults(): array
+    {
+        return $this->defaults ??= [
+            'margin' => (float) PlatformSetting::read('xml_margin_percent', '15'),
+            'min_margin' => (float) PlatformSetting::read('min_margin_percent', '5'),
+            'marketplace_margin' => (float) PlatformSetting::read('default_marketplace_margin', '20'),
+            'tax_rate' => (float) PlatformSetting::read('xml_tax_rate', '20'),
+            'include_tax' => PlatformSetting::read('xml_prices_include_tax', '0') === '1',
+        ];
+    }
     public function defaultXmlMargin(): float
     {
-        return (float) PlatformSetting::read('xml_margin_percent', '15');
+        return $this->defaults()['margin'];
     }
 
     public function defaultMinMargin(): float
     {
-        return (float) PlatformSetting::read('min_margin_percent', '5');
+        return $this->defaults()['min_margin'];
     }
 
     public function defaultMarketplaceMargin(): float
     {
-        return (float) PlatformSetting::read('default_marketplace_margin', '20');
+        return $this->defaults()['marketplace_margin'];
     }
 
     public function defaultXmlTaxRate(): float
     {
-        return (float) PlatformSetting::read('xml_tax_rate', '20');
+        return $this->defaults()['tax_rate'];
     }
 
     public function xmlPricesIncludeTax(): bool
     {
-        return PlatformSetting::read('xml_prices_include_tax', '0') === '1';
+        return $this->defaults()['include_tax'];
     }
 
     public function settingsFor(?Source $source = null): array

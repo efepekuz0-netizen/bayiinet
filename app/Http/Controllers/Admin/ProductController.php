@@ -125,8 +125,13 @@ class ProductController extends Controller
             'xml_margin_percent' => 'required|numeric|min:0|max:500',
         ]);
 
-        $count = $pricing->bulkApplyXmlMargin((float) $data['xml_margin_percent']);
-        \Cache::flush();
+        try {
+            $count = $pricing->bulkApplyXmlMargin((float) $data['xml_margin_percent']);
+            \Cache::forget('xml_feed_catalog');
+        } catch (\Throwable $e) {
+            report($e);
+            return back()->withInput()->with('error', 'Toplu fiyat güncellenemedi: '.$e->getMessage());
+        }
 
         return back()->with('success', "{$count} ürüne %{$data['xml_margin_percent']} XML kar oranı uygulandı.");
     }
