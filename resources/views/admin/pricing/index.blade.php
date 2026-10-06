@@ -76,12 +76,13 @@
                 @php
                     $cost = $p->cost_price ?? $p->price;
                     $sell = $p->sell_price ?? $p->price;
-                    $retail = round($sell * 1.20, 2);
+                    $margin = $p->xml_margin_percent ?? $settings['xml_margin_percent'];
+                    $retail = round($sell * (1 + ($settings['default_marketplace_margin'] / 100)), 2);
                 @endphp
                 <tr>
                     <td>{{ Str::limit($p->title, 40) }}</td>
                     <td>{{ number_format($cost, 2) }} ₺</td>
-                    <td>%{{ number_format($p->xml_margin_percent ?? 0, 1) }}</td>
+                    <td>%{{ number_format($margin, 1) }}</td>
                     <td class="fw-bold">{{ number_format($sell, 2) }} ₺</td>
                     <td class="text-success">{{ number_format($retail, 2) }} ₺</td>
                 </tr>
