@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Log;
 
 class SyncDealerFeeds extends Command
 {
-    protected $signature = 'bayixml:sync-dealers';
+    protected $signature = 'bayiinet:sync-dealers';
     protected $description = 'Tüm aktif bayilerin XML feed önbelleğini temizler ve senkron zamanını günceller (saatlik).';
 
     public function handle(): int
@@ -27,7 +27,7 @@ class SyncDealerFeeds extends Command
             $count++;
         }
 
-        Log::info("BayiXML: {$count} bayi feed senkronu tamamlandı.");
+        Log::info("Bayiinet: {$count} bayi feed senkronu tamamlandı.");
         $this->info("{$count} bayi güncellendi.");
 
         return self::SUCCESS;
