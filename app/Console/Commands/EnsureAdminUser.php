@@ -7,7 +7,7 @@ use Illuminate\Console\Command;
 
 class EnsureAdminUser extends Command
 {
-    protected $signature = 'bayixml:ensure-admin';
+    protected $signature = 'bayiinet:ensure-admin';
 
     protected $description = 'ADMIN_EMAIL ve ADMIN_PASSWORD ortam değişkenlerinden ilk yönetici hesabını oluşturur.';
 
