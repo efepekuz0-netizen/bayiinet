@@ -9,7 +9,7 @@
             </div>
         @endif
         <div class="p-3">
-            <div class="text-muted small mb-1">{{ $product->brand ?: 'BayiXML' }}</div>
+            <div class="text-muted small mb-1">{{ $product->brand ?: 'Bayiinet' }}</div>
             <h6 class="mb-2" style="font-size:.9rem;line-height:1.35;min-height:2.5em">{{ Str::limit($product->title, 55) }}</h6>
             <div class="d-flex justify-content-between align-items-center">
                 <span class="price">{{ number_format($product->sell_price ?? $product->price, 2) }} ₺</span>
