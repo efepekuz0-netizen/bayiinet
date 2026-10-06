@@ -17,7 +17,7 @@ php artisan view:clear
 php artisan migrate --force || echo "UYARI: migrate basarisiz. DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD degerlerini kontrol edin."
 
 # ADMIN_EMAIL ve ADMIN_PASSWORD tanımlıysa ilk yönetici hesabını oluştur
-php artisan bayixml:ensure-admin || true
+php artisan bayiinet:ensure-admin || true
 
 # Kuyruk işçisi (Trendyol senkronu) ve zamanlayıcı (saatlik bayi XML yenileme) arka planda çalışsın
 php artisan queue:work marketplace --queue=marketplace --sleep=3 --tries=1 --timeout=3600 &
