@@ -6,7 +6,7 @@
         <div class="col-md-5">
             <div class="card shadow">
                 <div class="card-body p-4">
-                    <h3 class="text-center mb-4">BayiXML Giriş</h3>
+                    <h3 class="text-center mb-4">Bayiinet Giriş</h3>
                     @if($errors->any())
                         <div class="alert alert-danger">{{ $errors->first() }}</div>
                     @endif
