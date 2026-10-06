@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>@yield('title', 'BayiXML') - XML Bayilik Sistemi</title>
+    <title>@yield('title', 'Bayiinet') - XML Bayilik Sistemi</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
@@ -40,7 +40,7 @@
 @auth
     @if(auth()->user()->isAdmin())
         <header class="topbar">
-            <a class="topbar-brand text-decoration-none" href="{{ route('admin.dashboard') }}">BayiXML <span class="text-muted fw-normal small">/ Yönetim Paneli</span></a>
+            <a class="topbar-brand text-decoration-none" href="{{ route('admin.dashboard') }}">Bayiinet <span class="text-muted fw-normal small">/ Yönetim Paneli</span></a>
             <div class="d-flex align-items-center gap-2">
                 <a href="{{ route('admin.settings.index') }}" class="btn btn-sm btn-light d-none d-md-inline">Ayarlar</a>
                 <span class="text-muted small d-none d-sm-inline">{{ auth()->user()->name }}</span>
@@ -49,7 +49,7 @@
         </header>
     @endif
     <div class="sidebar">
-        <div class="brand">{{ auth()->user()->isAdmin() ? 'İSTANBUL · BAYİ' : 'BAYİXML' }}<div class="small text-muted fw-normal">B2B / ENTEGRASYON</div></div>
+        <div class="brand">{{ auth()->user()->isAdmin() ? 'İSTANBUL · BAYİ' : 'Bayiinet' }}<div class="small text-muted fw-normal">B2B / ENTEGRASYON</div></div>
         <nav class="mt-3">
             @if(auth()->user()->isAdmin())
                 <a href="{{ route('admin.dashboard') }}" class="{{ request()->routeIs('admin.dashboard') ? 'active' : '' }}">
