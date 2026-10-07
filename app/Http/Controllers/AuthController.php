@@ -32,9 +32,17 @@ class AuthController extends Controller
                 return redirect()->route('admin.dashboard');
             }
 
-            return $user->dealer?->isActive()
-                ? redirect()->intended(route('home'))
-                : redirect()->route('dealer.application');
+            if ($user->isDealer()) {
+                // Bayi profili yoksa veya askıdaysa başvuru sayfası
+                $dealer = $user->dealer;
+                if (! $dealer || $dealer->status !== 'active') {
+                    return redirect()->route('dealer.application');
+                }
+
+                return redirect()->intended(route('dealer.dashboard'));
+            }
+
+            return redirect()->intended(route('home'));
         }
 
         return back()->withErrors(['email' => 'E-posta veya şifre hatalı.'])->onlyInput('email');
@@ -60,7 +68,7 @@ class AuthController extends Controller
             $user = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
-                'password' => Hash::make($data['password']),
+                'password' => $data['password'], // 'hashed' cast ile hashlenir
                 'role' => 'dealer',
             ]);
 

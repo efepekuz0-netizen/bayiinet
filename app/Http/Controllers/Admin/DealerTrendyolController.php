@@ -105,8 +105,8 @@ class DealerTrendyolController extends Controller
             'product_ids' => 'nullable|array|max:5000',
             'product_ids.*' => 'integer|exists:products,id',
             'send_all' => 'nullable|boolean',
-            'category_id' => 'required|integer|min:1',
-            'brand_id' => 'required|integer|min:1',
+            'category_id' => 'nullable|integer|min:1',
+            'brand_id' => 'nullable|integer|min:1',
             'attributes_json' => 'nullable|string|max:20000',
             'remember_category' => 'nullable|boolean',
         ]);
@@ -153,8 +153,8 @@ class DealerTrendyolController extends Controller
         $categoryId = (int) $data['category_id'];
         $brandId = (int) $data['brand_id'];
 
-        // Masaüstü gibi: bu kategori/markayı varsayılan olarak hatırla
-        if ($request->boolean('remember_category') || $sendAll) {
+        // Verilen kategori/markayı varsayılan olarak hatırla (otomatik eşleme yedegi)
+        if ($categoryId > 0 || $brandId > 0) {
             $matcher->setFallback($categoryId, $brandId);
         }
 
@@ -162,8 +162,8 @@ class DealerTrendyolController extends Controller
             $result = $this->trendyol->send(
                 $dealer,
                 $productIds,
-                $categoryId,
-                $brandId,
+                $categoryId > 0 ? $categoryId : null,
+                $brandId > 0 ? $brandId : null,
                 $attributes,
             );
         } catch (LogicException $e) {

@@ -7,6 +7,7 @@ use App\Models\DealerTrendyolListing;
 use App\Models\MarketplaceConnection;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use Illuminate\Support\Facades\Cache;
 use InvalidArgumentException;
 use LogicException;
 use Throwable;
@@ -59,7 +60,7 @@ class DealerTrendyolService
      * @param  array<int, array<string, mixed>>  $attributes  Trendyol kategori özellikleri
      * @return array{sent: int, failed: int, batches: array<int, string>, errors: array<int, string>}
      */
-    public function send(Dealer $dealer, array $productIds, int $categoryId, int $brandId, array $attributes = []): array
+    public function send(Dealer $dealer, array $productIds, ?int $categoryId = null, ?int $brandId = null, array $attributes = []): array
     {
         $connection = $this->connection($dealer);
         $margin = $this->dealerMargin($dealer);
@@ -69,15 +70,64 @@ class DealerTrendyolService
             ->whereIn('id', $productIds)
             ->get();
 
+        // Kategori ağacını bir kez çek (ürün başına otomatik eşleme için)
+        $leaves = [];
+        try {
+            $leaves = Cache::remember(
+                'trendyol_category_leaves_'.$dealer->trendyol_seller_id,
+                now()->addHours(12),
+                fn () => $this->api->categoryLeaves($connection)
+            );
+        } catch (Throwable $e) {
+            // Ağaç alınamazsa manuel/fallback ile devam
+            report($e);
+        }
+
+        $brandCache = [];
+        $defaultBrand = $brandId && $brandId > 0
+            ? $brandId
+            : ($this->categoryMatcher->fallbackBrandId() ?: null);
+
         $ready = [];
         $failed = 0;
         $errors = [];
 
         foreach ($products as $product) {
+            $resolved = $this->categoryMatcher->match($product, $leaves, $categoryId && $categoryId > 0 ? $categoryId : null);
+            $productCategoryId = $resolved['id'] ?? null;
+
+            if (! $productCategoryId) {
+                $failed++;
+                $errors[] = ($product->stock_code ?: $product->id).': kategori otomatik bulunamadı (başlık: '.mb_substr($product->title, 0, 40).')';
+                continue;
+            }
+
+            // Marka: ürün markası → API arama → varsayılan
+            $productBrandId = $defaultBrand;
+            $brandName = trim((string) ($product->brand ?? ''));
+            if ($brandName !== '') {
+                $cacheKey = mb_strtolower($brandName);
+                if (! array_key_exists($cacheKey, $brandCache)) {
+                    try {
+                        $brandCache[$cacheKey] = $this->api->findBrandId($connection, $brandName);
+                    } catch (Throwable $e) {
+                        $brandCache[$cacheKey] = null;
+                    }
+                }
+                if ($brandCache[$cacheKey]) {
+                    $productBrandId = $brandCache[$cacheKey];
+                }
+            }
+            if (! $productBrandId) {
+                $failed++;
+                $errors[] = ($product->stock_code ?: $product->id).': marka bulunamadı (ürün markası: '.($brandName ?: 'boş').'). Bir kez varsayılan Marka No girin veya ürün markasını doldurun.';
+                continue;
+            }
+
             foreach ($this->entries($product) as $variant) {
                 $barcode = $this->barcodeFor($product, $variant);
                 $sale = $this->salePrice($product, $variant, $margin);
-                $list = max((float) $product->list_price, $sale);
+                $list = max((float) ($product->list_price ?? 0), $sale);
                 $quantity = $this->quantityFor($product, $variant);
 
                 $listing = DealerTrendyolListing::query()->updateOrCreate(
@@ -88,8 +138,8 @@ class DealerTrendyolService
                         'sale_price' => $sale,
                         'list_price' => $list,
                         'quantity' => $quantity,
-                        'category_id' => $categoryId,
-                        'brand_id' => $brandId,
+                        'category_id' => $productCategoryId,
+                        'brand_id' => $productBrandId,
                         'status' => 'pending',
                         'batch_request_id' => null,
                         'error' => null,
@@ -108,8 +158,8 @@ class DealerTrendyolService
                         'list_price' => $list,
                         'vat_rate' => $product->tax_rate,
                         'desi' => $product->desi,
-                        'category_id' => $categoryId,
-                        'brand_id' => $brandId,
+                        'category_id' => $productCategoryId,
+                        'brand_id' => $productBrandId,
                         'attributes' => $attributes,
                     ]);
                 } catch (InvalidArgumentException $e) {

@@ -97,11 +97,11 @@
             <div class="row g-2 mb-3">
                 <div class="col-md-3">
                     <label class="form-label small mb-1">Trendyol Kategori No</label>
-                    <input type="number" name="category_id" class="form-control form-control-sm" value="{{ old('category_id', $defaultCategoryId ?? '') }}" required>
+                    <input type="number" name="category_id" class="form-control form-control-sm" value="{{ old('category_id', $defaultCategoryId ?? '') }}" placeholder="Boş = ürüne göre otomatik">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label small mb-1">Trendyol Marka No</label>
-                    <input type="number" name="brand_id" class="form-control form-control-sm" value="{{ old('brand_id', $defaultBrandId ?? '') }}" required>
+                    <input type="number" name="brand_id" class="form-control form-control-sm" value="{{ old('brand_id', $defaultBrandId ?? '') }}" placeholder="Boş = ürün markasından otomatik">
                 </div>
                 <div class="col-md-6">
                     <label class="form-label small mb-1">Kategori özellikleri (JSON, isteğe bağlı)</label>
@@ -110,9 +110,9 @@
                 </div>
             </div>
             <div class="form-text mb-3">
-                <strong>Tüm ürünleri gönder</strong> stoklu aktif ürünlerin tamamını bu kategori + marka ile Trendyol’a yollar (masaüstü “onboard” gibi).
-                Farklı kategoriler için ürünleri gruplar hâlinde seçip ayrı gönderin.
-                Kategori ve marka numaralarını Trendyol satıcı panelinden alın. Zorunlu özellik eksikse “Sonuç sorgula” ile hata görünür.
+                <strong>Kategori ve marka otomatik seçilir</strong> (ürün başlığı + XML kategorisi + anahtar kelimeler; masaüstü mantığı).
+                İsterseniz alanları doldurarak zorla override edebilirsiniz; bir kez girilen marka varsayılan yedek olarak saklanır.
+                <strong>Tüm ürünleri gönder</strong> stoklu aktif ürünlerin tamamını yollar. Zorunlu özellik eksikse “Sonuç sorgula” ile hata görünür.
             </div>
 
             <div class="table-responsive">

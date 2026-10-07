@@ -110,6 +110,7 @@ Route::middleware(['auth', 'dealer'])
     ->name('dealer.')
     ->group(function () {
         Route::get('/', [DealerDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/hesabim', [DealerDashboardController::class, 'account'])->name('account');
         Route::get('/urunler', [DealerProductController::class, 'index'])->name('products.index');
         Route::get('/siparisler', [DealerOrderController::class, 'index'])->name('orders.index');
         Route::get('/siparisler/yeni', [DealerOrderController::class, 'create'])->name('orders.create');

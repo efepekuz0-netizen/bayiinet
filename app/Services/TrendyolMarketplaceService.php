@@ -93,6 +93,97 @@ class TrendyolMarketplaceService
         );
     }
 
+
+    /**
+     * Trendyol kategori ağacı (yaprak kategoriler).
+     * @return list<array{id:int,name:string,path:string}>
+     */
+    public function categoryLeaves(MarketplaceConnection $connection): array
+    {
+        $response = $this->get($connection, '/integration/product/product-categories');
+        $roots = $response['categories'] ?? $response;
+        if (! is_array($roots)) {
+            return [];
+        }
+
+        $leaves = [];
+        $walk = function ($nodes, array $path) use (&$walk, &$leaves): void {
+            if (! is_array($nodes)) {
+                return;
+            }
+            foreach ($nodes as $node) {
+                if (! is_array($node)) {
+                    continue;
+                }
+                $name = (string) ($node['name'] ?? '');
+                $id = (int) ($node['id'] ?? 0);
+                $sub = $node['subCategories'] ?? [];
+                $next = $name !== '' ? array_merge($path, [$name]) : $path;
+                if ((! is_array($sub) || $sub === []) && $id > 0 && $name !== '') {
+                    $leaves[] = [
+                        'id' => $id,
+                        'name' => $name,
+                        'path' => implode(' >>> ', $next),
+                    ];
+                } else {
+                    $walk($sub, $next);
+                }
+            }
+        };
+        $walk($roots, []);
+
+        return $leaves;
+    }
+
+    /**
+     * Marka adına göre Trendyol brandId arar.
+     */
+    public function findBrandId(MarketplaceConnection $connection, string $brandName): ?int
+    {
+        $brandName = trim($brandName);
+        if ($brandName === '') {
+            return null;
+        }
+
+        $response = $this->get($connection, '/integration/product/brands', [
+            'name' => $brandName,
+            'page' => 0,
+            'size' => 20,
+        ]);
+
+        $brands = $response['brands'] ?? $response['content'] ?? $response;
+        if (! is_array($brands)) {
+            return null;
+        }
+
+        $lower = mb_strtolower($brandName);
+        foreach ($brands as $brand) {
+            if (! is_array($brand)) {
+                continue;
+            }
+            $name = mb_strtolower((string) ($brand['name'] ?? ''));
+            if ($name === $lower && ! empty($brand['id'])) {
+                return (int) $brand['id'];
+            }
+        }
+        foreach ($brands as $brand) {
+            if (! is_array($brand)) {
+                continue;
+            }
+            $name = mb_strtolower((string) ($brand['name'] ?? ''));
+            if ($name !== '' && (str_contains($name, $lower) || str_contains($lower, $name)) && ! empty($brand['id'])) {
+                return (int) $brand['id'];
+            }
+        }
+
+        $first = $brands[0] ?? null;
+        if (is_array($first) && ! empty($first['id'])) {
+            return (int) $first['id'];
+        }
+
+        return null;
+    }
+
     private function productPath(MarketplaceConnection $connection): string
     {
         return '/integration/product/sellers/'.rawurlencode($connection->account_id);

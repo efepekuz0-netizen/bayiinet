@@ -4,11 +4,10 @@ namespace App\Services;
 
 use App\Models\PlatformSetting;
 use App\Models\Product;
+use Illuminate\Support\Facades\Cache;
 
 /**
- * Masaüstü category_map.py ile aynı mantık:
- * - Kaydedilmiş XML yolu / başlık eşlemesi
- * - Anahtar kelime yedekleri
+ * Masaüstü product_onboard.match_category + category_map ile aynı mantık.
  */
 class TrendyolCategoryMatcher
 {
@@ -29,22 +28,19 @@ class TrendyolCategoryMatcher
         ['kart bıçak', 'Çakı'],
         ['kulak temiz', 'Kulak Temizleme Cihazı'],
         ['şarj kablo', 'Şarj Kablosu'],
-        ['usb', 'Şarj Kablosu'],
-        ['kablo', 'Şarj Kablosu'],
-        ['buhar', 'Hava Nemlendirici'],
-        ['vakum', 'El Süpürgesi'],
-        ['yüz tüy', 'Epilatör'],
-        ['swab', 'Kulak Temizleme Cihazı'],
-        ['bıçak', 'Çakı'],
-        ['dolap', 'Ecza Dolabı'],
+        ['usb kablo', 'Şarj Kablosu'],
         ['powerbank', 'Powerbank'],
         ['power bank', 'Powerbank'],
         ['fener', 'El Feneri'],
-        ['kamp', 'Kamp Malzemeleri'],
+        ['kamp fener', 'El Feneri'],
         ['demlik', 'Çaydanlık'],
-        ['çay', 'Çaydanlık'],
+        ['çay keyfi', 'Çaydanlık'],
         ['lamba', 'Masa Lambası'],
         ['hacamat', 'Hacamat Seti'],
+        ['buhar', 'Hava Nemlendirici'],
+        ['vakum', 'El Süpürgesi'],
+        ['bıçak', 'Çakı'],
+        ['dolap', 'Ecza Dolabı'],
     ];
 
     public function map(): array
@@ -53,13 +49,11 @@ class TrendyolCategoryMatcher
         if ($raw === '') {
             return ['by_xml' => [], 'by_id' => [], 'fallback_id' => 0, 'fallback_brand_id' => 0];
         }
-
         $data = json_decode($raw, true);
 
-        return is_array($data) ? array_merge(
-            ['by_xml' => [], 'by_id' => [], 'fallback_id' => 0, 'fallback_brand_id' => 0],
-            $data
-        ) : ['by_xml' => [], 'by_id' => [], 'fallback_id' => 0, 'fallback_brand_id' => 0];
+        return is_array($data)
+            ? array_merge(['by_xml' => [], 'by_id' => [], 'fallback_id' => 0, 'fallback_brand_id' => 0], $data)
+            : ['by_xml' => [], 'by_id' => [], 'fallback_id' => 0, 'fallback_brand_id' => 0];
     }
 
     public function saveMap(array $data): void
@@ -83,66 +77,155 @@ class TrendyolCategoryMatcher
     public function setFallback(int $categoryId, int $brandId = 0): void
     {
         $data = $this->map();
-        $data['fallback_id'] = $categoryId;
+        if ($categoryId > 0) {
+            $data['fallback_id'] = $categoryId;
+        }
         if ($brandId > 0) {
             $data['fallback_brand_id'] = $brandId;
         }
         $this->saveMap($data);
     }
 
-    /**
-     * Ürün için Trendyol kategori id önerisi.
-     * @return array{id: int|null, reason: string}
-     */
-    public function resolve(Product $product, ?int $overrideCategoryId = null): array
-    {
-        if ($overrideCategoryId && $overrideCategoryId > 0) {
-            return ['id' => $overrideCategoryId, 'reason' => 'manual'];
-        }
-
-        $map = $this->map();
-        $keys = array_filter([
-            $product->category_path,
-            $product->main_category,
-            $product->sub_category,
-            $product->title,
-        ]);
-
-        foreach ($keys as $k) {
-            $lk = mb_strtolower(trim((string) $k));
-            if ($lk !== '' && isset($map['by_xml'][$lk]['id'])) {
-                return ['id' => (int) $map['by_xml'][$lk]['id'], 'reason' => 'saved:'.$lk];
-            }
-        }
-
-        $blob = $this->normalize(implode(' ', [
-            $product->title,
-            $product->category_path,
-            $product->main_category,
-            $product->sub_category,
-        ]));
-
-        foreach (self::KEYWORDS as [$needle, $label]) {
-            if (str_contains($blob, $this->normalize($needle))) {
-                // Kaydedilmiş id varsa onu kullan
-                foreach ($map['by_xml'] as $entry) {
-                    if (isset($entry['name']) && $this->normalize($entry['name']) === $this->normalize($label) && ! empty($entry['id'])) {
-                        return ['id' => (int) $entry['id'], 'reason' => 'keyword:'.$label];
-                    }
-                }
-
-                return ['id' => null, 'reason' => 'keyword_need_id:'.$label];
-            }
-        }
-
-        $fb = (int) ($map['fallback_id'] ?? 0);
-
-        return ['id' => $fb > 0 ? $fb : null, 'reason' => $fb > 0 ? 'fallback' : 'none'];
-    }
-
     public function fallbackBrandId(): int
     {
         return (int) ($this->map()['fallback_brand_id'] ?? 0);
+    }
+
+    public function fallbackCategoryId(): int
+    {
+        return (int) ($this->map()['fallback_id'] ?? 0);
+    }
+
+    /**
+     * @param  list<array{id:int,name:string,path:string}>  $leaves
+     * @return array{id: int|null, name: string, reason: string}
+     */
+    public function match(Product $product, array $leaves, ?int $overrideCategoryId = null): array
+    {
+        if ($overrideCategoryId && $overrideCategoryId > 0) {
+            return ['id' => $overrideCategoryId, 'name' => '', 'reason' => 'manual'];
+        }
+
+        $map = $this->map();
+        $xmlPath = (string) ($product->category_path ?? '');
+        $title = (string) ($product->title ?? '');
+
+        // 1) Kaydedilmiş eşleme
+        foreach (array_filter([$xmlPath, $product->main_category, $product->sub_category, $title]) as $k) {
+            $lk = mb_strtolower(trim((string) $k));
+            if ($lk !== '' && isset($map['by_xml'][$lk]['id'])) {
+                $id = (int) $map['by_xml'][$lk]['id'];
+                foreach ($leaves as $leaf) {
+                    if ((int) $leaf['id'] === $id) {
+                        return ['id' => $id, 'name' => $leaf['name'], 'reason' => 'saved'];
+                    }
+                }
+                return ['id' => $id, 'name' => (string) ($map['by_xml'][$lk]['name'] ?? ''), 'reason' => 'saved'];
+            }
+        }
+
+        if ($leaves === []) {
+            $fb = $this->fallbackCategoryId();
+
+            return ['id' => $fb > 0 ? $fb : null, 'name' => '', 'reason' => $fb > 0 ? 'fallback' : 'none'];
+        }
+
+        $byName = [];
+        $byNorm = [];
+        foreach ($leaves as $leaf) {
+            $n = mb_strtolower($leaf['name']);
+            $byName[$n][] = $leaf;
+            $byNorm[$this->normalize($leaf['name'])][] = $leaf;
+        }
+
+        // 2) XML kategori parçaları / main_category
+        $parts = array_filter(array_map('trim', preg_split('/>>>|>|\//', $xmlPath) ?: []));
+        $candidates = array_values(array_filter(array_merge(
+            [end($parts) ?: '', (string) $product->main_category, (string) $product->sub_category],
+            array_reverse($parts),
+        )));
+
+        foreach ($candidates as $c) {
+            if ($c === '') {
+                continue;
+            }
+            $cl = mb_strtolower($c);
+            if (isset($byName[$cl][0])) {
+                $hit = $byName[$cl][0];
+                $this->remember($xmlPath ?: $c, (int) $hit['id'], $hit['name']);
+
+                return ['id' => (int) $hit['id'], 'name' => $hit['name'], 'reason' => 'name'];
+            }
+            $cn = $this->normalize($c);
+            if ($cn !== '' && isset($byNorm[$cn][0])) {
+                $hit = $byNorm[$cn][0];
+                $this->remember($xmlPath ?: $c, (int) $hit['id'], $hit['name']);
+
+                return ['id' => (int) $hit['id'], 'name' => $hit['name'], 'reason' => 'norm'];
+            }
+            if (strlen($cn) >= 4) {
+                foreach ($leaves as $leaf) {
+                    $ln = $this->normalize($leaf['name']);
+                    if ($cn === $ln || str_contains($ln, $cn) || str_contains($cn, $ln)) {
+                        $this->remember($xmlPath ?: $c, (int) $leaf['id'], $leaf['name']);
+
+                        return ['id' => (int) $leaf['id'], 'name' => $leaf['name'], 'reason' => 'partial'];
+                    }
+                }
+            }
+        }
+
+        // 3) Anahtar kelimeler
+        $blob = $this->normalize(implode(' ', [$title, $xmlPath, (string) $product->main_category]));
+        foreach (self::KEYWORDS as [$needle, $tyName]) {
+            if (! str_contains($blob, $this->normalize($needle))) {
+                continue;
+            }
+            $tn = mb_strtolower($tyName);
+            if (isset($byName[$tn][0])) {
+                $hit = $byName[$tn][0];
+                $this->remember($xmlPath ?: $needle, (int) $hit['id'], $hit['name']);
+
+                return ['id' => (int) $hit['id'], 'name' => $hit['name'], 'reason' => 'keyword:'.$tyName];
+            }
+            $nn = $this->normalize($tyName);
+            if (isset($byNorm[$nn][0])) {
+                $hit = $byNorm[$nn][0];
+                $this->remember($xmlPath ?: $needle, (int) $hit['id'], $hit['name']);
+
+                return ['id' => (int) $hit['id'], 'name' => $hit['name'], 'reason' => 'keyword:'.$tyName];
+            }
+        }
+
+        // 4) Token skoru
+        $tokens = array_values(array_filter(explode(' ', $blob), fn ($t) => strlen($t) >= 4));
+        $best = null;
+        $bestScore = 0;
+        foreach ($leaves as $leaf) {
+            $leafN = $this->normalize($leaf['name']);
+            $pathN = $this->normalize($leaf['path']);
+            $score = 0;
+            foreach ($tokens as $t) {
+                if (str_contains($leafN, $t)) {
+                    $score += 3;
+                } elseif (str_contains($pathN, $t)) {
+                    $score += 1;
+                }
+            }
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $best = $leaf;
+            }
+        }
+        if ($best && $bestScore >= 2) {
+            $this->remember($xmlPath ?: mb_substr($title, 0, 40), (int) $best['id'], $best['name']);
+
+            return ['id' => (int) $best['id'], 'name' => $best['name'], 'reason' => 'score:'.$bestScore];
+        }
+
+        $fb = $this->fallbackCategoryId();
+
+        return ['id' => $fb > 0 ? $fb : null, 'name' => '', 'reason' => $fb > 0 ? 'fallback' : 'none'];
     }
 
     private function normalize(string $s): string
