@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Dealer;
 use App\Models\Product;
 use App\Services\DealerTrendyolService;
+use App\Services\TrendyolCategoryMatcher;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use LogicException;
@@ -55,8 +56,13 @@ class DealerTrendyolController extends Controller
             ->unique()
             ->take(10);
 
+        $catMap = app(\App\Services\TrendyolCategoryMatcher::class)->map();
+        $defaultCategoryId = (int) ($catMap['fallback_id'] ?? 0) ?: old('category_id');
+        $defaultBrandId = (int) ($catMap['fallback_brand_id'] ?? 0) ?: old('brand_id');
+
         return view('admin.dealers.trendyol', compact(
             'dealer', 'products', 'prices', 'margin', 'listed', 'counts', 'recent', 'batches', 'search',
+            'defaultCategoryId', 'defaultBrandId',
         ));
     }
 
@@ -92,18 +98,45 @@ class DealerTrendyolController extends Controller
         return $this->runTest($dealer, 'Trendyol bağlantısı başarılı.');
     }
 
-    public function send(Request $request, Dealer $dealer): RedirectResponse
+
+    public function send(Request $request, Dealer $dealer, TrendyolCategoryMatcher $matcher): RedirectResponse
     {
         $data = $request->validate([
-            'product_ids' => 'required|array|min:1|max:200',
+            'product_ids' => 'nullable|array|max:5000',
             'product_ids.*' => 'integer|exists:products,id',
+            'send_all' => 'nullable|boolean',
             'category_id' => 'required|integer|min:1',
             'brand_id' => 'required|integer|min:1',
             'attributes_json' => 'nullable|string|max:20000',
+            'remember_category' => 'nullable|boolean',
         ]);
 
         if (! $dealer->isActive()) {
             return $this->back($dealer)->with('error', 'Bayi onaylı (aktif) değil.');
+        }
+
+        $sendAll = $request->boolean('send_all');
+        if ($sendAll) {
+            $productIds = Product::query()
+                ->where('is_active', true)
+                ->where(function ($q) {
+                    $q->where(function ($plain) {
+                        $plain->where('has_variants', false)->where('stock', '>', 0);
+                    })->orWhere(function ($v) {
+                        $v->where('has_variants', true)
+                            ->whereHas('variants', fn ($s) => $s->where('stock', '>', 0));
+                    });
+                })
+                ->orderBy('id')
+                ->limit(5000)
+                ->pluck('id')
+                ->all();
+        } else {
+            $productIds = array_map('intval', $data['product_ids'] ?? []);
+        }
+
+        if ($productIds === []) {
+            return $this->back($dealer)->with('error', 'Gönderilecek ürün seçilmedi. Tümünü gönder veya listeden seçin.');
         }
 
         $attributes = [];
@@ -117,12 +150,20 @@ class DealerTrendyolController extends Controller
             }
         }
 
+        $categoryId = (int) $data['category_id'];
+        $brandId = (int) $data['brand_id'];
+
+        // Masaüstü gibi: bu kategori/markayı varsayılan olarak hatırla
+        if ($request->boolean('remember_category') || $sendAll) {
+            $matcher->setFallback($categoryId, $brandId);
+        }
+
         try {
             $result = $this->trendyol->send(
                 $dealer,
-                array_map('intval', $data['product_ids']),
-                (int) $data['category_id'],
-                (int) $data['brand_id'],
+                $productIds,
+                $categoryId,
+                $brandId,
                 $attributes,
             );
         } catch (LogicException $e) {

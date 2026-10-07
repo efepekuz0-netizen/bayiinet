@@ -97,11 +97,11 @@
             <div class="row g-2 mb-3">
                 <div class="col-md-3">
                     <label class="form-label small mb-1">Trendyol Kategori No</label>
-                    <input type="number" name="category_id" class="form-control form-control-sm" value="{{ old('category_id') }}" required>
+                    <input type="number" name="category_id" class="form-control form-control-sm" value="{{ old('category_id', $defaultCategoryId ?? '') }}" required>
                 </div>
                 <div class="col-md-3">
                     <label class="form-label small mb-1">Trendyol Marka No</label>
-                    <input type="number" name="brand_id" class="form-control form-control-sm" value="{{ old('brand_id') }}" required>
+                    <input type="number" name="brand_id" class="form-control form-control-sm" value="{{ old('brand_id', $defaultBrandId ?? '') }}" required>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label small mb-1">Kategori özellikleri (JSON, isteğe bağlı)</label>
@@ -110,8 +110,9 @@
                 </div>
             </div>
             <div class="form-text mb-3">
-                Seçtiğiniz tüm ürünler aynı kategori, marka ve özelliklerle gönderilir; farklı kategoriler için ürünleri gruplar hâlinde gönderin.
-                Kategori ve marka numaralarını Trendyol satıcı panelinden veya API'den öğrenebilirsiniz. Kategorinin zorunlu özellikleri eksikse Trendyol ürünü reddeder ve sebebi "Sonuç sorgula" ile görünür.
+                <strong>Tüm ürünleri gönder</strong> stoklu aktif ürünlerin tamamını bu kategori + marka ile Trendyol’a yollar (masaüstü “onboard” gibi).
+                Farklı kategoriler için ürünleri gruplar hâlinde seçip ayrı gönderin.
+                Kategori ve marka numaralarını Trendyol satıcı panelinden alın. Zorunlu özellik eksikse “Sonuç sorgula” ile hata görünür.
             </div>
 
             <div class="table-responsive">
@@ -122,7 +123,7 @@
                             <th>Ürün</th>
                             <th>Stok kodu</th>
                             <th class="text-end">Stok</th>
-                            <th class="text-end">Trendyol fiyatı (%{{ rtrim(rtrim(number_format($margin, 2, '.', ''), '0'), '.') }} kâr)</th>
+                            <th class="text-end">Trendyol fiyatı (motor)</th>
                             <th>Durum</th>
                         </tr>
                     </thead>
@@ -148,11 +149,24 @@
                 </table>
             </div>
 
-            <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
                 <div>{{ $products->links() }}</div>
-                <button class="btn btn-primary" @disabled(! $dealer->hasTrendyolCredentials())>Seçilenleri Trendyol'a gönder</button>
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="document.querySelectorAll('.pick').forEach(c=>c.checked=true)">Bu sayfadakileri seç</button>
+                    <button type="submit" class="btn btn-primary" @disabled(! $dealer->hasTrendyolCredentials()) name="send_all" value="0">Seçilenleri gönder</button>
+                    <button type="submit" class="btn btn-success"
+                            @disabled(! $dealer->hasTrendyolCredentials())
+                            name="send_all" value="1"
+                            onclick="return confirm('Aktif ve stoklu TÜM ürünler (en fazla 5000) bu kategori/marka ile Trendyol\'a gönderilecek. Devam?')">
+                        Tüm ürünleri gönder
+                    </button>
+                </div>
             </div>
-            <div class="form-text">Seçimler yalnızca bulunduğunuz sayfa için geçerlidir; tek seferde en fazla 200 ürün gönderilir.</div>
+            <div class="form-text mt-2">
+                Fiyat = masaüstü motoru: (bayi maliyeti + kargo + kar) ÷ (1 − %15 komisyon), xx.99 yuvarlama.
+                Kategori/marka bir kez girilince varsayılan olarak kaydedilir.
+            </div>
+            <input type="hidden" name="remember_category" value="1">
         </form>
     </div>
 </div>

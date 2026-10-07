@@ -21,6 +21,8 @@ class DealerTrendyolService
     public function __construct(
         private readonly TrendyolMarketplaceService $api,
         private readonly PricingService $pricing,
+        private readonly TrendyolPriceCalculator $priceCalculator,
+        private readonly TrendyolCategoryMatcher $categoryMatcher,
     ) {}
 
     /**
@@ -266,13 +268,40 @@ class DealerTrendyolService
             : $this->pricing->defaultMarketplaceMargin();
     }
 
-    /** Bayinin Trendyol satış fiyatı: bizim bayi satış fiyatı + bayi kâr yüzdesi. */
+    /**
+     * Masaüstü pricing_engine ile aynı formül:
+     * cost = bayiye satış fiyatı (dealer cost)
+     * S = (landed + kar) / (1 - komisyon), kargo desi+fiyata göre, xx.99 yuvarlama
+     * $margin yüzde olarak gelir (örn. 60).
+     */
     public function salePrice(Product $product, ?ProductVariant $variant, float $margin): float
     {
-        $base = (float) ($product->sell_price ?: $product->price);
+        $base = (float) ($product->sell_price ?: $product->price ?: $product->cost_price ?: 0);
         $base += (float) ($variant?->price_diff ?? 0);
+        if ($base <= 0) {
+            return 0.0;
+        }
 
-        return $this->pricing->calculateDealerRetailPrice($base, $margin);
+        $desi = (float) ($product->desi ?: 5);
+        if ($desi <= 0) {
+            $desi = 5.0;
+        }
+
+        // margin yüzde (60) -> calculator 0.60 veya 60 kabul eder
+        $calculated = $this->priceCalculator->calculate($base, $desi, [
+            'profit_margin' => $margin,
+            'commission_rate' => 0.15,
+            'min_profit' => 10,
+            'round_to' => 0.99,
+            'delivery_type' => 'standart',
+        ]);
+
+        if ($calculated === null || $calculated <= 0) {
+            // Fallback: basit marj
+            return $this->pricing->calculateDealerRetailPrice($base, $margin);
+        }
+
+        return $calculated;
     }
 
     private function quantityFor(Product $product, ?ProductVariant $variant): int
