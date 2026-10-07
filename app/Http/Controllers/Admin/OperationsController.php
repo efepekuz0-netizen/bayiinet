@@ -148,8 +148,9 @@ class OperationsController extends Controller
             'xml_prices_include_tax' => PlatformSetting::read('xml_prices_include_tax', '0'),
         ];
         $products = Product::query()->where('is_active', true)->latest()->paginate(30);
+        $lastBulk = Cache::get('pricing_bulk_last_result');
 
-        return view('admin.pricing.index', compact('settings', 'products'));
+        return view('admin.pricing.index', compact('settings', 'products', 'lastBulk'));
     }
 
     public function updatePricing(Request $request)
@@ -172,8 +173,14 @@ class OperationsController extends Controller
         $msg = 'Kar oranları kaydedildi.';
 
         if ($request->boolean('apply_to_all')) {
-            $count = app(\App\Services\PricingService::class)->bulkApplyXmlMargin((float) $data['xml_margin_percent'], true);
-            $msg .= " {$count} ürüne uygulandı.";
+            // Arka planda uygula — sayfa anında yanıt verir, uzun bekleme olmaz
+            \App\Jobs\ApplyBulkXmlMargin::dispatch(
+                (float) $data['xml_margin_percent'],
+                true,
+                null,
+                auth()->id()
+            );
+            $msg .= ' Tüm ürünlere uygulama arka planda başlatıldı. Birkaç saniye / dakika içinde tamamlanır.';
         }
 
         Cache::forget('xml_feed_catalog');
@@ -201,11 +208,16 @@ class OperationsController extends Controller
 
         PlatformSetting::write('xml_prices_include_tax', $request->boolean('xml_prices_include_tax') ? '1' : '0');
         if (array_key_exists('xml_margin_percent', $data) && $data['xml_margin_percent'] !== null) {
-            app(\App\Services\PricingService::class)->bulkApplyXmlMargin((float) $data['xml_margin_percent'], array_key_exists('xml_tax_rate', $data));
+            \App\Jobs\ApplyBulkXmlMargin::dispatch(
+                (float) $data['xml_margin_percent'],
+                array_key_exists('xml_tax_rate', $data),
+                null,
+                auth()->id()
+            );
         }
         Cache::forget('xml_feed_catalog');
 
-        return back()->with('success', 'Panel ayarları kaydedildi.');
+        return back()->with('success', 'Panel ayarları kaydedildi. Kar oranı değiştiyse ürün fiyatları arka planda güncelleniyor.');
     }
 
     public function settings()

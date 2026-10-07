@@ -59,6 +59,7 @@ Route::middleware(['auth', 'admin'])
         Route::post('/bayiler/{dealer}/onayla', [AdminDealerController::class, 'approve'])->name('dealers.approve');
         Route::post('/bayiler/{dealer}/askiya-al', [AdminDealerController::class, 'suspend'])->name('dealers.suspend');
         Route::post('/bayiler/{dealer}/bakiye', [AdminDealerController::class, 'addBalance'])->name('dealers.balance');
+        Route::put('/bayiler/{dealer}', [AdminDealerController::class, 'update'])->name('dealers.update');
 
         Route::get('/bayiler/{dealer}/trendyol', [AdminDealerTrendyolController::class, 'index'])->name('dealers.trendyol');
         Route::put('/bayiler/{dealer}/trendyol/baglanti', [AdminDealerTrendyolController::class, 'saveConnection'])->name('dealers.trendyol.connection');

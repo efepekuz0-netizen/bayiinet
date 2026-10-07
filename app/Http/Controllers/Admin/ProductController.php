@@ -102,14 +102,17 @@ class ProductController extends Controller
             }
         }
 
-        // Fiyatları yeniden uygula
-        app(PricingService::class)->bulkApplyXmlMargin(
-            app(PricingService::class)->defaultXmlMargin()
+        // Fiyatları arka planda yeniden uygula
+        \App\Jobs\ApplyBulkXmlMargin::dispatch(
+            app(PricingService::class)->defaultXmlMargin(),
+            false,
+            null,
+            auth()->id()
         );
 
-        \Cache::flush();
+        \Cache::forget('xml_feed_catalog');
 
-        $msg = "Çekim tamam: {$totalCreated} yeni, {$totalUpdated} güncellendi.";
+        $msg = "Çekim tamam: {$totalCreated} yeni, {$totalUpdated} güncellendi. Fiyatlar arka planda güncelleniyor.";
         if ($errors) {
             $msg .= ' Hatalar: '.implode('; ', $errors);
             return back()->with('error', $msg);
@@ -118,21 +121,21 @@ class ProductController extends Controller
         return back()->with('success', $msg);
     }
 
-    /** Toplu kar oranı uygula */
+    /** Toplu kar oranı uygula — arka planda çalışır */
     public function bulkMargin(Request $request, PricingService $pricing)
     {
         $data = $request->validate([
             'xml_margin_percent' => 'required|numeric|min:0|max:500',
         ]);
 
-        try {
-            $count = $pricing->bulkApplyXmlMargin((float) $data['xml_margin_percent']);
-            \Cache::forget('xml_feed_catalog');
-        } catch (\Throwable $e) {
-            report($e);
-            return back()->withInput()->with('error', 'Toplu fiyat güncellenemedi: '.$e->getMessage());
-        }
+        \App\Jobs\ApplyBulkXmlMargin::dispatch(
+            (float) $data['xml_margin_percent'],
+            false,
+            null,
+            auth()->id()
+        );
+        \Cache::forget('xml_feed_catalog');
 
-        return back()->with('success', "{$count} ürüne %{$data['xml_margin_percent']} XML kar oranı uygulandı.");
+        return back()->with('success', "%{$data['xml_margin_percent']} kar oranı tüm ürünlere arka planda uygulanıyor. Kısa süre içinde tamamlanır.");
     }
 }

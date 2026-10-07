@@ -45,15 +45,20 @@ class SourceController extends Controller
         $source->update($data);
 
         if ($request->boolean('recalculate')) {
-            app(\App\Services\PricingService::class)->bulkApplyXmlMargin(
+            \App\Jobs\ApplyBulkXmlMargin::dispatch(
                 (float) ($source->xml_margin_percent ?? app(\App\Services\PricingService::class)->defaultXmlMargin()),
                 true,
                 $source->id,
+                auth()->id()
             );
         }
 
         \Illuminate\Support\Facades\Cache::forget('xml_feed_catalog');
-        return redirect()->route('admin.sources.index')->with('success', 'Kaynak ayarları güncellendi.');
+        $msg = 'Kaynak ayarları güncellendi.';
+        if ($request->boolean('recalculate')) {
+            $msg .= ' Ürün fiyatları arka planda yeniden hesaplanıyor.';
+        }
+        return redirect()->route('admin.sources.index')->with('success', $msg);
     }
 
     public function store(Request $request)

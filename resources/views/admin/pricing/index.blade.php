@@ -2,7 +2,19 @@
 @section('title', 'Kâr & Fiyatlama')
 @section('content')
 <h4 class="mb-1">Kâr & Fiyatlama Merkezi</h4>
-<p class="text-muted mb-4">XML karı = sizin kârınız · Pazaryeri karı = bayinin kârı</p>
+<p class="text-muted mb-4">XML karı = sizin kârınız · Pazaryeri karı = bayinin kârı. “Tüm ürünlere uygula” seçiliyse işlem arka planda çalışır, sayfa anında yanıt verir.</p>
+
+@if(!empty($lastBulk))
+<div class="alert {{ isset($lastBulk['error']) ? 'alert-warning' : 'alert-info' }} mb-4">
+    <strong>Son toplu fiyat güncellemesi:</strong>
+    @if(isset($lastBulk['error']))
+        Hata: {{ $lastBulk['error'] }}
+    @else
+        {{ $lastBulk['count'] ?? 0 }} ürün · %{{ $lastBulk['margin'] ?? '-' }} · {{ $lastBulk['finished_at'] ?? '' }}
+        @if(!empty($lastBulk['seconds'])) ({{ $lastBulk['seconds'] }} sn) @endif
+    @endif
+</div>
+@endif
 
 <div class="row g-3 mb-4">
     <div class="col-md-4">
