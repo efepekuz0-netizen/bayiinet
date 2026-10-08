@@ -106,7 +106,9 @@ class TrendyolProductPayload
             'dimensionalWeight' => max(0.1, round((float) ($d['desi'] ?? 1), 2)),
             'listPrice' => $listPrice,
             'salePrice' => $salePrice,
-            'vatRate' => (int) ($d['vat_rate'] ?? 10),
+            'vatRate' => (int) ($d['vat_rate'] ?? 20),
+            'currencyType' => 'TRY',
+            'origin' => 'TR',
             'images' => $images,
             'attributes' => array_values((array) ($d['attributes'] ?? [])),
         ];

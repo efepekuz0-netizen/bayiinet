@@ -85,6 +85,7 @@ class DealerTrendyolService
         }
 
         $brandCache = [];
+        $attrCache = [];
         // Form / kayıtlı fallback (zorunlu değil — XML markası öncelikli)
         $defaultBrand = $brandId && $brandId > 0
             ? $brandId
@@ -191,6 +192,14 @@ class DealerTrendyolService
                 }
 
                 try {
+                    $productAttrs = $attributes !== []
+                        ? $attributes
+                        : $this->attributesForCategory($connection, (int) $productCategoryId, $attrCache);
+                    if ($productAttrs === null) {
+                        $failed++;
+                        $errors[] = ($product->stock_code ?: $product->id).': zorunlu kategori özellikleri doldurulamadı (kat: '.$productCategoryId.')';
+                        continue;
+                    }
                     $item = TrendyolProductPayload::item([
                         'barcode' => $barcode,
                         'stock_code' => $product->stock_code,
@@ -200,11 +209,11 @@ class DealerTrendyolService
                         'quantity' => $quantity,
                         'sale_price' => $sale,
                         'list_price' => $list,
-                        'vat_rate' => $product->tax_rate,
+                        'vat_rate' => $product->tax_rate ?: 20,
                         'desi' => $product->desi,
                         'category_id' => $productCategoryId,
                         'brand_id' => $productBrandId,
-                        'attributes' => $attributes,
+                        'attributes' => $productAttrs,
                     ]);
                 } catch (InvalidArgumentException $e) {
                     $listing->update(['status' => 'failed', 'error' => $e->getMessage()]);
@@ -221,10 +230,15 @@ class DealerTrendyolService
         $sent = 0;
         $batches = [];
 
-        // Yeni ürün oluştur
+        // Yeni ürün oluştur + batch sonucunu doğrula (masaüstü gibi)
         foreach (array_chunk($readyCreate, self::CHUNK_SIZE) as $chunk) {
             $items = array_column($chunk, 'item');
             $listingIds = array_map(fn (array $row) => $row['listing']->id, $chunk);
+            $barcodeToListing = [];
+            foreach ($chunk as $row) {
+                $bc = (string) ($row['item']['barcode'] ?? $row['listing']->barcode);
+                $barcodeToListing[$bc] = $row['listing']->id;
+            }
 
             try {
                 $response = $this->api->createProducts($connection, $items);
@@ -237,9 +251,22 @@ class DealerTrendyolService
                     'sent_at' => now(),
                 ]);
 
-                $sent += count($chunk);
                 if ($batchId !== '') {
                     $batches[] = $batchId;
+                    // Trendyol batch sonucu (1–3 sn bekleyip oku)
+                    usleep(1500000);
+                    try {
+                        $verify = $this->applyBatchResult($dealer, $connection, $batchId, $barcodeToListing);
+                        $sent += $verify['created'];
+                        $failed += $verify['failed'];
+                        $errors = array_merge($errors, $verify['errors']);
+                    } catch (Throwable $ve) {
+                        // Sonuç henüz hazır değilse sent say; sonra «Sonuç sorgula»
+                        $sent += count($chunk);
+                        $errors[] = 'Batch '.$batchId.': sonuç bekleniyor ('.$ve->getMessage().')';
+                    }
+                } else {
+                    $sent += count($chunk);
                 }
             } catch (Throwable $e) {
                 DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
@@ -418,6 +445,196 @@ class DealerTrendyolService
         });
 
         return ['deleted' => $deleted, 'failed' => $failed, 'errors' => array_values(array_unique($errors))];
+    }
+
+    /**
+     * Masaüstü build_attributes: zorunlu kategori özelliklerini doldur.
+     * @param  array<int, mixed>  $cache
+     * @return list<array<string, mixed>>|null
+     */
+    private function attributesForCategory(MarketplaceConnection $connection, int $categoryId, array &$cache): ?array
+    {
+        if ($categoryId <= 0) {
+            return [];
+        }
+        if (! array_key_exists($categoryId, $cache)) {
+            try {
+                $data = Cache::remember(
+                    'trendyol_cat_attrs_'.$categoryId,
+                    now()->addDays(3),
+                    fn () => $this->api->categoryAttributes($connection, $categoryId)
+                );
+                $cache[$categoryId] = is_array($data['categoryAttributes'] ?? null) ? $data['categoryAttributes'] : [];
+            } catch (Throwable $e) {
+                $cache[$categoryId] = null;
+            }
+        }
+        $rows = $cache[$categoryId];
+        if ($rows === null) {
+            return null;
+        }
+        if ($rows === []) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $a) {
+            if (! is_array($a) || empty($a['required'])) {
+                continue;
+            }
+            $attr = is_array($a['attribute'] ?? null) ? $a['attribute'] : [];
+            $aid = (int) ($attr['id'] ?? 0);
+            if ($aid <= 0) {
+                continue;
+            }
+            $name = mb_strtolower((string) ($attr['name'] ?? ''));
+            $vals = is_array($a['attributeValues'] ?? null) ? $a['attributeValues'] : [];
+            $allow = ! empty($a['allowCustom']);
+
+            $pref = [];
+            if (str_contains($name, 'menşei') || str_contains($name, 'mensei') || str_contains($name, 'origin')) {
+                $pref = ['TR', 'Türkiye', 'Turkey'];
+            } elseif (str_contains($name, 'yaş')) {
+                $pref = ['Yetişkin', 'Yetiskin'];
+            } elseif (str_contains($name, 'cinsiyet')) {
+                $pref = ['Unisex', 'Kadın / Kız', 'Erkek'];
+            } elseif (str_contains($name, 'renk') || str_contains($name, 'color') || str_contains($name, 'web color')) {
+                $pref = ['Çok Renkli', 'Siyah', 'Beyaz', 'Gri'];
+            } elseif (str_contains($name, 'beden') || str_contains($name, 'size')) {
+                $pref = ['Tek Ebat', 'Standart', 'Tek Beden', 'One Size'];
+            } elseif (str_contains($name, 'garanti süresi') || str_contains($name, 'garanti suresi')) {
+                $pref = ['2 Yıl', '24 Ay', '1 Yıl', '12 Ay'];
+            } elseif (str_contains($name, 'garanti tipi')) {
+                $pref = ['Distribütör Garantili', 'İthalatçı Garantili'];
+            }
+
+            $chosen = null;
+            $valMap = [];
+            foreach ($vals as $v) {
+                if (! is_array($v) || empty($v['id'])) {
+                    continue;
+                }
+                $vn = mb_strtolower(trim((string) ($v['name'] ?? '')));
+                if ($vn !== '') {
+                    $valMap[$vn] = $v;
+                }
+            }
+            foreach ($pref as $p) {
+                $pl = mb_strtolower($p);
+                if (isset($valMap[$pl])) {
+                    $chosen = $valMap[$pl];
+                    break;
+                }
+            }
+            if ($chosen === null && $vals !== []) {
+                $first = $vals[0];
+                if (is_array($first) && ! empty($first['id'])) {
+                    $chosen = $first;
+                }
+            }
+
+            if ($chosen !== null) {
+                $out[] = [
+                    'attributeId' => $aid,
+                    'attributeValueId' => (int) $chosen['id'],
+                ];
+            } elseif ($allow) {
+                $custom = 'Standart';
+                if (str_contains($name, 'renk')) {
+                    $custom = 'Siyah';
+                } elseif (str_contains($name, 'menşei') || str_contains($name, 'mensei')) {
+                    $custom = 'TR';
+                }
+                $out[] = [
+                    'attributeId' => $aid,
+                    'customAttributeValue' => $custom,
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Batch sonucunu listing durumlarına uygula.
+     * @param  array<string, int>  $barcodeToListing
+     * @return array{created: int, failed: int, errors: list<string>}
+     */
+    private function applyBatchResult(Dealer $dealer, MarketplaceConnection $connection, string $batchId, array $barcodeToListing): array
+    {
+        $result = $this->api->batchResult($connection, $batchId);
+        $created = 0;
+        $failed = 0;
+        $errors = [];
+
+        $items = $result['items'] ?? [];
+        if (! is_array($items) || $items === []) {
+            $status = (string) ($result['status'] ?? '');
+            if (in_array(mb_strtoupper($status), ['COMPLETED', 'FINISHED', 'DONE'], true)) {
+                $failCount = (int) ($result['failedItemCount'] ?? 0);
+                $itemCount = (int) ($result['itemCount'] ?? 0);
+                if ($itemCount > 0) {
+                    return [
+                        'created' => max(0, $itemCount - $failCount),
+                        'failed' => $failCount,
+                        'errors' => $failCount > 0 ? ['Batch failedItemCount='.$failCount] : [],
+                    ];
+                }
+            }
+            throw new \RuntimeException('Batch henüz hazır değil: '.$status);
+        }
+
+        foreach ($items as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $barcode = (string) (
+                data_get($row, 'requestItem.barcode')
+                ?? data_get($row, 'requestItem.products.0.barcode')
+                ?? data_get($row, 'barcode')
+                ?? ''
+            );
+            $status = mb_strtoupper((string) ($row['status'] ?? data_get($row, 'itemStatus') ?? ''));
+            $failure = '';
+            if (is_array($row['failureReasons'] ?? null)) {
+                $failure = implode('; ', array_map(
+                    fn ($r) => is_string($r) ? $r : json_encode($r, JSON_UNESCAPED_UNICODE),
+                    $row['failureReasons']
+                ));
+            } else {
+                $failure = (string) ($row['failureReason'] ?? $row['reason'] ?? data_get($row, 'statusDescription') ?? '');
+            }
+
+            $listingId = $barcodeToListing[$barcode] ?? null;
+            $ok = in_array($status, ['SUCCESS', 'SUCCESSFUL', 'CREATED', 'APPROVED'], true)
+                || ($status === '' && $failure === '');
+
+            if ($ok) {
+                $created++;
+                if ($listingId) {
+                    DealerTrendyolListing::query()->whereKey($listingId)->update([
+                        'status' => 'created',
+                        'error' => null,
+                        'checked_at' => now(),
+                    ]);
+                }
+            } else {
+                $failed++;
+                $msg = $failure !== '' ? $failure : ($status !== '' ? $status : 'Trendyol reddetti');
+                if ($listingId) {
+                    DealerTrendyolListing::query()->whereKey($listingId)->update([
+                        'status' => 'failed',
+                        'error' => mb_substr($msg, 0, 1000),
+                        'checked_at' => now(),
+                    ]);
+                }
+                if (count($errors) < 15) {
+                    $errors[] = ($barcode !== '' ? $barcode.': ' : '').mb_substr($msg, 0, 180);
+                }
+            }
+        }
+
+        return ['created' => $created, 'failed' => $failed, 'errors' => $errors];
     }
 
     /** Bayinin kâr yüzdesi; tanımlı değilse platform varsayılanı. */

@@ -73,6 +73,19 @@ class TrendyolMarketplaceService
         );
     }
 
+
+    /**
+     * Kategori zorunlu/opsiyonel özellikleri.
+     * @return array{categoryAttributes?: list<array<string,mixed>>}
+     */
+    public function categoryAttributes(MarketplaceConnection $connection, int $categoryId): array
+    {
+        return $this->get(
+            $connection,
+            '/integration/product/product-categories/'.$categoryId.'/attributes',
+        );
+    }
+
     public function batchResult(MarketplaceConnection $connection, string $batchRequestId): array
     {
         return $this->get(
