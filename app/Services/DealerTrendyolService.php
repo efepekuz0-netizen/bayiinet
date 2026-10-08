@@ -85,15 +85,33 @@ class DealerTrendyolService
         }
 
         $brandCache = [];
-        // Masaüstü product_onboard: BRAND_ID varsayılanı
+        // Form / kayıtlı fallback (zorunlu değil — XML markası öncelikli)
         $defaultBrand = $brandId && $brandId > 0
             ? $brandId
-            : ($this->categoryMatcher->fallbackBrandId() ?: 2613880);
+            : ($this->categoryMatcher->fallbackBrandId() ?: null);
 
         $readyCreate = [];
         $readyUpdate = [];
         $failed = 0;
         $errors = [];
+
+        // Benzersiz XML markalarını bir kez çöz (11k ürün → birkaç API çağrısı)
+        $uniqueBrands = $products->pluck('brand')->map(fn ($b) => trim((string) $b))->filter()->unique()->values();
+        foreach ($uniqueBrands as $bn) {
+            $ck = mb_strtolower($bn);
+            if (array_key_exists($ck, $brandCache)) {
+                continue;
+            }
+            try {
+                $brandCache[$ck] = Cache::remember(
+                    'trendyol_brand_'.md5($ck),
+                    now()->addDays(14),
+                    fn () => $this->api->findBrandId($connection, $bn)
+                );
+            } catch (Throwable $e) {
+                $brandCache[$ck] = null;
+            }
+        }
 
         foreach ($products as $product) {
             $resolved = $this->categoryMatcher->match($product, $leaves, $categoryId && $categoryId > 0 ? $categoryId : null);
@@ -105,41 +123,42 @@ class DealerTrendyolService
                 continue;
             }
 
-            // Marka: varsayılan öncelikli (API çağrısı yok → takılma olmaz)
-            // Ürün markası sadece cache'te varsa kullanılır
-            $productBrandId = $defaultBrand;
+            // Marka önceliği: 1) XML markası → Trendyol API  2) form varsayılan  3) yoksa hata
+            $productBrandId = null;
             $brandName = trim((string) ($product->brand ?? ''));
             if ($brandName !== '') {
                 $cacheKey = mb_strtolower($brandName);
                 if (! array_key_exists($cacheKey, $brandCache)) {
-                    $cached = Cache::get('trendyol_brand_'.md5($cacheKey));
-                    if ($cached) {
-                        $brandCache[$cacheKey] = $cached;
-                    } elseif ($defaultBrand) {
-                        // Varsayılan varken API'ye gitme — 11k üründe timeout önlenir
+                    try {
+                        $brandCache[$cacheKey] = Cache::remember(
+                            'trendyol_brand_'.md5($cacheKey),
+                            now()->addDays(14),
+                            function () use ($connection, $brandName) {
+                                $id = $this->api->findBrandId($connection, $brandName);
+                                // Kısmi eşleşme bulunamazsa birebir "Diğer" deneme
+                                if (! $id) {
+                                    $id = $this->api->findBrandId($connection, 'Diğer')
+                                        ?: $this->api->findBrandId($connection, 'Diger');
+                                }
+
+                                return $id;
+                            }
+                        );
+                    } catch (Throwable $e) {
                         $brandCache[$cacheKey] = null;
-                    } else {
-                        try {
-                            $brandCache[$cacheKey] = Cache::remember(
-                                'trendyol_brand_'.md5($cacheKey),
-                                now()->addDays(7),
-                                fn () => $this->api->findBrandId($connection, $brandName)
-                            );
-                        } catch (Throwable $e) {
-                            $brandCache[$cacheKey] = null;
-                        }
                     }
                 }
                 if ($brandCache[$cacheKey]) {
-                    $productBrandId = $brandCache[$cacheKey];
+                    $productBrandId = (int) $brandCache[$cacheKey];
                 }
             }
-            if (! $productBrandId) {
+            // XML'de marka yok / API bulamadı → form varsayılanı
+            if (! $productBrandId && $defaultBrand) {
                 $productBrandId = $defaultBrand;
             }
             if (! $productBrandId) {
                 $failed++;
-                $errors[] = ($product->stock_code ?: $product->id).': Marka No gerekli. Trendyol sayfasında varsayılan Marka No girin (tek sefer).';
+                $errors[] = ($product->stock_code ?: $product->id).': marka yok (XML: "'.($brandName ?: 'boş').'"). XML markasını doldurun veya varsayılan Marka No girin.';
                 continue;
             }
 
