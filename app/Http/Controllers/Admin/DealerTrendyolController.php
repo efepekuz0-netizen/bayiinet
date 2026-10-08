@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Dealer;
 use App\Models\Product;
+use App\Jobs\SendDealerTrendyolCatalog;
 use App\Services\DealerTrendyolService;
+use Illuminate\Support\Facades\Cache;
 use App\Services\TrendyolCategoryMatcher;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -60,9 +62,11 @@ class DealerTrendyolController extends Controller
         $defaultCategoryId = (int) ($catMap['fallback_id'] ?? 0) ?: old('category_id');
         $defaultBrandId = (int) ($catMap['fallback_brand_id'] ?? 0) ?: old('brand_id');
 
+        $sendStatus = Cache::get('trendyol_send_status_'.$dealer->id);
+
         return view('admin.dealers.trendyol', compact(
             'dealer', 'products', 'prices', 'margin', 'listed', 'counts', 'recent', 'batches', 'search',
-            'defaultCategoryId', 'defaultBrandId',
+            'defaultCategoryId', 'defaultBrandId', 'sendStatus',
         ));
     }
 
@@ -158,31 +162,32 @@ class DealerTrendyolController extends Controller
             $matcher->setFallback($categoryId, $brandId);
         }
 
-        try {
-            $result = $this->trendyol->send(
-                $dealer,
-                $productIds,
-                $categoryId > 0 ? $categoryId : null,
-                $brandId > 0 ? $brandId : null,
-                $attributes,
-            );
-        } catch (LogicException $e) {
-            return $this->back($dealer)->with('error', $e->getMessage());
-        } catch (Throwable $e) {
-            report($e);
-
-            return $this->back($dealer)->with('error', 'Gönderim sırasında hata oluştu: '.$e->getMessage());
+        if (! $dealer->hasTrendyolCredentials()) {
+            return $this->back($dealer)->with('error', 'Önce Trendyol API bilgilerini kaydedin.');
         }
 
-        $message = "{$result['sent']} ürün Trendyol'a gönderildi.";
-        if ($result['sent'] > 0) {
-            $message .= ' Sonucu birkaç dakika sonra "Sonuç sorgula" ile kontrol edin.';
-        }
-        if ($result['failed'] > 0) {
-            $message .= " {$result['failed']} ürün gönderilemedi: ".implode(' / ', array_slice($result['errors'], 0, 3));
-        }
+        // Sayfa anında dönsün — gönderim kuyrukta
+        Cache::put('trendyol_send_status_'.$dealer->id, [
+            'status' => 'queued',
+            'message' => count($productIds).' ürün kuyruğa alındı…',
+            'queued_at' => now()->toIso8601String(),
+        ], now()->addHours(2));
 
-        return $this->back($dealer)->with($result['sent'] > 0 ? 'success' : 'error', $message);
+        SendDealerTrendyolCatalog::dispatch(
+            $dealer->id,
+            $sendAll ? null : $productIds,
+            $categoryId > 0 ? $categoryId : null,
+            $brandId > 0 ? $brandId : null,
+            $attributes,
+            false,
+        );
+
+        $n = $sendAll ? 'tüm stoklu ürünler' : (count($productIds).' ürün');
+
+        return $this->back($dealer)->with(
+            'success',
+            $n.' Trendyol kuyruğuna alındı. İşlem arka planda sürer; birkaç dakika sonra Sonuç sorgula veya durum kutusunu kontrol edin.'
+        );
     }
 
     public function checkBatch(Request $request, Dealer $dealer): RedirectResponse

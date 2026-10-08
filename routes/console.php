@@ -10,3 +10,4 @@ Artisan::command('inspire', function () {
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('bayiinet:sync-dealers')->hourly();
+Schedule::command('bayiinet:sync-trendyol')->hourly();

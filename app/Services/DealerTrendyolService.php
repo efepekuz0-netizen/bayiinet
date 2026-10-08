@@ -70,17 +70,18 @@ class DealerTrendyolService
             ->whereIn('id', $productIds)
             ->get();
 
-        // Kategori ağacını bir kez çek (ürün başına otomatik eşleme için)
+        // Kategori ağacı yalnızca otomatik eşleme gerekiyorsa (manuel kategori yoksa)
         $leaves = [];
-        try {
-            $leaves = Cache::remember(
-                'trendyol_category_leaves_'.$dealer->trendyol_seller_id,
-                now()->addHours(12),
-                fn () => $this->api->categoryLeaves($connection)
-            );
-        } catch (Throwable $e) {
-            // Ağaç alınamazsa manuel/fallback ile devam
-            report($e);
+        if (! $categoryId) {
+            try {
+                $leaves = Cache::remember(
+                    'trendyol_category_leaves',
+                    now()->addHours(24),
+                    fn () => $this->api->categoryLeaves($connection)
+                );
+            } catch (Throwable $e) {
+                report($e);
+            }
         }
 
         $brandCache = [];
@@ -109,7 +110,11 @@ class DealerTrendyolService
                 $cacheKey = mb_strtolower($brandName);
                 if (! array_key_exists($cacheKey, $brandCache)) {
                     try {
-                        $brandCache[$cacheKey] = $this->api->findBrandId($connection, $brandName);
+                        $brandCache[$cacheKey] = Cache::remember(
+                            'trendyol_brand_'.md5($cacheKey),
+                            now()->addDays(7),
+                            fn () => $this->api->findBrandId($connection, $brandName)
+                        );
                     } catch (Throwable $e) {
                         $brandCache[$cacheKey] = null;
                     }

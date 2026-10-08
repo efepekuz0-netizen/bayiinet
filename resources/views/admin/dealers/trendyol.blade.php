@@ -1,6 +1,16 @@
 @extends('layouts.app')
 @section('title', $dealer->company_name.' · Trendyol')
 @section('content')
+@if(!empty($sendStatus))
+    <div class="alert alert-{{ ($sendStatus['status'] ?? '') === 'error' ? 'danger' : (($sendStatus['status'] ?? '') === 'done' ? 'success' : 'info') }} mb-3">
+        <strong>Trendyol gönderim durumu:</strong>
+        {{ $sendStatus['message'] ?? $sendStatus['status'] ?? '' }}
+        @if(!empty($sendStatus['sent'])) · {{ $sendStatus['sent'] }} gönderildi @endif
+        @if(!empty($sendStatus['failed'])) · {{ $sendStatus['failed'] }} hatalı @endif
+        @if(!empty($sendStatus['seconds'])) · {{ $sendStatus['seconds'] }} sn @endif
+    </div>
+@endif
+
 @php
     $statusLabels = ['pending' => 'Hazırlandı', 'sent' => 'Gönderildi', 'created' => 'Trendyol\'da oluştu', 'failed' => 'Hatalı'];
     $statusColors = ['pending' => 'secondary', 'sent' => 'info', 'created' => 'success', 'failed' => 'danger'];
