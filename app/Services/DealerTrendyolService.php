@@ -194,7 +194,14 @@ class DealerTrendyolService
                 try {
                     $productAttrs = $attributes !== []
                         ? $attributes
-                        : $this->attributesForCategory($connection, (int) $productCategoryId, $attrCache);
+                        : $this->attributesForCategory(
+                            $connection,
+                            (int) $productCategoryId,
+                            $attrCache,
+                            (string) ($product->title ?? ''),
+                            (string) ($product->description ?? ''),
+                            (string) ($product->category_path ?? $product->category ?? ''),
+                        );
                     if ($productAttrs === null) {
                         $failed++;
                         $errors[] = ($product->stock_code ?: $product->id).': zorunlu kategori özellikleri doldurulamadı (kat: '.$productCategoryId.')';
@@ -452,8 +459,19 @@ class DealerTrendyolService
      * @param  array<int, mixed>  $cache
      * @return list<array<string, mixed>>|null
      */
-    private function attributesForCategory(MarketplaceConnection $connection, int $categoryId, array &$cache): ?array
-    {
+    /**
+     * Zorunlu özellikleri ürün adından türet (renk, beden, menşei, garanti…).
+     * @param  array<int, mixed>  $cache
+     * @return list<array<string, mixed>>|null
+     */
+    private function attributesForCategory(
+        MarketplaceConnection $connection,
+        int $categoryId,
+        array &$cache,
+        string $title = '',
+        string $description = '',
+        string $categoryPath = '',
+    ): ?array {
         if ($categoryId <= 0) {
             return [];
         }
@@ -477,6 +495,12 @@ class DealerTrendyolService
             return [];
         }
 
+        $blob = $this->normalizeText($title.' '.$description.' '.$categoryPath);
+        $inferredColor = $this->inferColor($blob, $title);
+        $inferredSize = $this->inferSize($blob, $title);
+        $inferredGender = $this->inferGender($blob);
+        $inferredAge = $this->inferAge($blob);
+
         $out = [];
         foreach ($rows as $a) {
             if (! is_array($a) || empty($a['required'])) {
@@ -492,74 +516,244 @@ class DealerTrendyolService
             $allow = ! empty($a['allowCustom']);
 
             $pref = [];
-            if (str_contains($name, 'menşei') || str_contains($name, 'mensei') || str_contains($name, 'origin')) {
-                $pref = ['TR', 'Türkiye', 'Turkey'];
-            } elseif (str_contains($name, 'yaş')) {
-                $pref = ['Yetişkin', 'Yetiskin'];
+            $customFallback = 'Standart';
+
+            if (str_contains($name, 'menşei') || str_contains($name, 'mensei') || str_contains($name, 'origin') || str_contains($name, 'üretim yeri')) {
+                $pref = ['TR', 'Türkiye', 'Turkey', 'Turkiye'];
+                $customFallback = 'TR';
+            } elseif (str_contains($name, 'yaş') || str_contains($name, 'yas grub')) {
+                $pref = $inferredAge;
+                $customFallback = $inferredAge[0] ?? 'Yetişkin';
             } elseif (str_contains($name, 'cinsiyet')) {
-                $pref = ['Unisex', 'Kadın / Kız', 'Erkek'];
-            } elseif (str_contains($name, 'renk') || str_contains($name, 'color') || str_contains($name, 'web color')) {
-                $pref = ['Çok Renkli', 'Siyah', 'Beyaz', 'Gri'];
-            } elseif (str_contains($name, 'beden') || str_contains($name, 'size')) {
-                $pref = ['Tek Ebat', 'Standart', 'Tek Beden', 'One Size'];
-            } elseif (str_contains($name, 'garanti süresi') || str_contains($name, 'garanti suresi')) {
-                $pref = ['2 Yıl', '24 Ay', '1 Yıl', '12 Ay'];
-            } elseif (str_contains($name, 'garanti tipi')) {
-                $pref = ['Distribütör Garantili', 'İthalatçı Garantili'];
+                $pref = $inferredGender;
+                $customFallback = $inferredGender[0] ?? 'Unisex';
+            } elseif (str_contains($name, 'renk') || str_contains($name, 'color') || str_contains($name, 'web color') || str_contains($name, 'renk ailesi')) {
+                $pref = $inferredColor;
+                $customFallback = $inferredColor[0] ?? 'Siyah';
+            } elseif (str_contains($name, 'beden') || str_contains($name, 'size') || str_contains($name, 'numara') || str_contains($name, 'ölçü')) {
+                $pref = $inferredSize;
+                $customFallback = $inferredSize[0] ?? 'Tek Ebat';
+            } elseif (str_contains($name, 'garanti süresi') || str_contains($name, 'garanti suresi') || (str_contains($name, 'garanti') && str_contains($name, 'süre'))) {
+                $pref = $this->inferWarrantyMonths($blob, $title);
+                $customFallback = '2 Yıl';
+            } elseif (str_contains($name, 'garanti tipi') || str_contains($name, 'garanti tür')) {
+                $pref = ['Distribütör Garantili', 'İthalatçı Garantili', 'Üretici Garantili'];
+                $customFallback = 'Distribütör Garantili';
+            } elseif (str_contains($name, 'materyal') || str_contains($name, 'malzeme') || str_contains($name, 'kumaş')) {
+                $pref = $this->inferMaterial($blob);
+                $customFallback = $pref[0] ?? 'Diğer';
             }
 
-            $chosen = null;
-            $valMap = [];
-            foreach ($vals as $v) {
-                if (! is_array($v) || empty($v['id'])) {
-                    continue;
-                }
-                $vn = mb_strtolower(trim((string) ($v['name'] ?? '')));
-                if ($vn !== '') {
-                    $valMap[$vn] = $v;
-                }
-            }
-            foreach ($pref as $p) {
-                $pl = mb_strtolower($p);
-                if (isset($valMap[$pl])) {
-                    $chosen = $valMap[$pl];
-                    break;
-                }
-            }
-            if ($chosen === null && $vals !== []) {
-                $first = $vals[0];
-                if (is_array($first) && ! empty($first['id'])) {
-                    $chosen = $first;
-                }
-            }
-
+            $chosen = $this->pickAttributeValue($vals, $pref);
             if ($chosen !== null) {
                 $out[] = [
                     'attributeId' => $aid,
                     'attributeValueId' => (int) $chosen['id'],
                 ];
             } elseif ($allow) {
-                $custom = 'Standart';
-                if (str_contains($name, 'renk')) {
-                    $custom = 'Siyah';
-                } elseif (str_contains($name, 'menşei') || str_contains($name, 'mensei')) {
-                    $custom = 'TR';
-                }
                 $out[] = [
                     'attributeId' => $aid,
-                    'customAttributeValue' => $custom,
+                    'customAttributeValue' => mb_substr($customFallback, 0, 50),
                 ];
+            } elseif ($vals !== []) {
+                // Son çare: listedeki ilk değer
+                $first = $vals[0];
+                if (is_array($first) && ! empty($first['id'])) {
+                    $out[] = [
+                        'attributeId' => $aid,
+                        'attributeValueId' => (int) $first['id'],
+                    ];
+                }
             }
         }
 
         return $out;
     }
 
-    /**
-     * Batch sonucunu listing durumlarına uygula.
-     * @param  array<string, int>  $barcodeToListing
-     * @return array{created: int, failed: int, errors: list<string>}
-     */
+    /** @param  list<array<string,mixed>>  $vals @param  list<string>  $pref */
+    private function pickAttributeValue(array $vals, array $pref): ?array
+    {
+        if ($vals === []) {
+            return null;
+        }
+        $valMap = [];
+        foreach ($vals as $v) {
+            if (! is_array($v) || empty($v['id'])) {
+                continue;
+            }
+            $vn = mb_strtolower(trim((string) ($v['name'] ?? '')));
+            if ($vn !== '') {
+                $valMap[$vn] = $v;
+            }
+        }
+        foreach ($pref as $p) {
+            $pl = mb_strtolower(trim($p));
+            if ($pl === '') {
+                continue;
+            }
+            if (isset($valMap[$pl])) {
+                return $valMap[$pl];
+            }
+            // kısmi eşleşme
+            foreach ($valMap as $vn => $v) {
+                if (str_contains($vn, $pl) || str_contains($pl, $vn)) {
+                    return $v;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeText(string $s): string
+    {
+        $s = mb_strtolower($s);
+        $map = ['ı' => 'i', 'İ' => 'i', 'ş' => 's', 'ğ' => 'g', 'ü' => 'u', 'ö' => 'o', 'ç' => 'c', 'â' => 'a', 'î' => 'i', 'û' => 'u'];
+        $s = strtr($s, $map);
+
+        return preg_replace('/\s+/', ' ', $s) ?? $s;
+    }
+
+    /** @return list<string> */
+    private function inferColor(string $blob, string $title): array
+    {
+        $colors = [
+            'siyah' => ['Siyah', 'Black'],
+            'beyaz' => ['Beyaz', 'White'],
+            'kirmizi' => ['Kırmızı', 'Kirmizi', 'Red'],
+            'mavi' => ['Mavi', 'Lacivert', 'Blue'],
+            'lacivert' => ['Lacivert', 'Mavi'],
+            'yesil' => ['Yeşil', 'Yesil', 'Green'],
+            'sari' => ['Sarı', 'Sari', 'Yellow'],
+            'turuncu' => ['Turuncu', 'Orange'],
+            'pembe' => ['Pembe', 'Pink'],
+            'mor' => ['Mor', 'Purple'],
+            'gri' => ['Gri', 'Gray', 'Grey'],
+            'kahve' => ['Kahverengi', 'Kahve', 'Brown'],
+            'bej' => ['Bej', 'Beige'],
+            'altin' => ['Altın', 'Gold'],
+            'gumus' => ['Gümüş', 'Gumus', 'Silver'],
+            'seffaf' => ['Şeffaf', 'Seffaf', 'Transparent'],
+            'cok renk' => ['Çok Renkli', 'Cok Renkli', 'Multicolor'],
+            'renkli' => ['Çok Renkli', 'Cok Renkli'],
+        ];
+        $found = [];
+        foreach ($colors as $needle => $prefs) {
+            if (str_contains($blob, $needle)) {
+                $found = array_merge($found, $prefs);
+            }
+        }
+        if ($found !== []) {
+            return array_values(array_unique($found));
+        }
+
+        return ['Siyah', 'Çok Renkli', 'Beyaz', 'Gri'];
+    }
+
+    /** @return list<string> */
+    private function inferSize(string $blob, string $title): array
+    {
+        // Açık beden: S, M, L, XL, XXL, 36-46
+        if (preg_match('/\b(xxxl|xxl|xl|xs)\b/iu', $title, $m)) {
+            $t = mb_strtoupper($m[1]);
+
+            return [$t, $m[1]];
+        }
+        if (preg_match('/\b([sml])\b/iu', $title, $m)) {
+            $t = mb_strtoupper($m[1]);
+
+            return [$t, $m[1]];
+        }
+        if (preg_match('/\b(3[6-9]|4[0-6])\b/', $title, $m)) {
+            return [$m[1]];
+        }
+        if (preg_match('/(\d+(?:[.,]\d+)?)\s*(?:cm|mm|inch|in|metre|mt|m)\b/iu', $blob, $m)) {
+            $v = str_replace(',', '.', $m[1]);
+
+            return [$m[0], $v, 'Tek Ebat', 'Standart'];
+        }
+        // Set / kit / takım → tek ebat
+        if (preg_match('/\b(set|takim|kit|paket|combo)\b/u', $blob)) {
+            return ['Tek Ebat', 'Standart', 'Tek Beden', 'One Size'];
+        }
+
+        return ['Tek Ebat', 'Standart', 'Tek Beden', 'One Size', 'Tek Boy'];
+    }
+
+    /** @return list<string> */
+    private function inferGender(string $blob): array
+    {
+        if (preg_match('/\b(kadin|kiz|bayan|women|female)\b/u', $blob)) {
+            return ['Kadın / Kız', 'Kadın', 'Kız', 'Unisex'];
+        }
+        if (preg_match('/\b(erkek|bay|men|male|oğlan|oglan)\b/u', $blob)) {
+            return ['Erkek', 'Unisex'];
+        }
+        if (preg_match('/\b(cocuk|çocuk|bebek|kids|child|baby)\b/u', $blob)) {
+            return ['Unisex', 'Çocuk', 'Erkek Çocuk', 'Kız Çocuk'];
+        }
+
+        return ['Unisex', 'Kadın / Kız', 'Erkek'];
+    }
+
+    /** @return list<string> */
+    private function inferAge(string $blob): array
+    {
+        if (preg_match('/\b(bebek|0-12|0-24 ay)\b/u', $blob)) {
+            return ['Bebek', '0-24 Ay'];
+        }
+        if (preg_match('/\b(cocuk|çocuk|kids|genç|genc)\b/u', $blob)) {
+            return ['Çocuk', 'Genç', 'Yetişkin'];
+        }
+
+        return ['Yetişkin', 'Yetiskin', 'Adult'];
+    }
+
+    /** @return list<string> */
+    private function inferWarrantyMonths(string $blob, string $title): array
+    {
+        if (preg_match('/(\d+)\s*y[iı]l/ui', $title.' '.$blob, $m)) {
+            $y = (int) $m[1];
+
+            return [$y.' Yıl', ($y * 12).' Ay', (string) $y.' Yıl'];
+        }
+        if (preg_match('/(\d+)\s*ay/ui', $title.' '.$blob, $m)) {
+            $a = (int) $m[1];
+
+            return [$a.' Ay', (string) $a.' Ay'];
+        }
+        // Elektronik / alet → 2 yıl
+        if (preg_match('/\b(matkap|tiras|tıraş|kulaklik|hoparlor|led|lamba|sarj|şarj|powerbank|gamepad)\b/u', $blob)) {
+            return ['2 Yıl', '24 Ay', '1 Yıl', '12 Ay'];
+        }
+
+        return ['2 Yıl', '24 Ay', '1 Yıl', '12 Ay', '6 Ay'];
+    }
+
+    /** @return list<string> */
+    private function inferMaterial(string $blob): array
+    {
+        $map = [
+            'plastik' => ['Plastik'],
+            'metal' => ['Metal', 'Çelik'],
+            'celik' => ['Çelik', 'Metal'],
+            'ahsap' => ['Ahşap', 'Ahsap'],
+            'cam' => ['Cam'],
+            'silikon' => ['Silikon'],
+            'deri' => ['Deri'],
+            'kumas' => ['Kumaş', 'Tekstil'],
+            'pamuk' => ['Pamuk'],
+            'abs' => ['Plastik', 'ABS'],
+        ];
+        foreach ($map as $needle => $prefs) {
+            if (str_contains($blob, $needle)) {
+                return $prefs;
+            }
+        }
+
+        return ['Diğer', 'Plastik', 'Metal'];
+    }
+
     private function applyBatchResult(Dealer $dealer, MarketplaceConnection $connection, string $batchId, array $barcodeToListing): array
     {
         $result = $this->api->batchResult($connection, $batchId);
