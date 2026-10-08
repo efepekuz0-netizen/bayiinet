@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Dealer;
 use App\Models\Product;
+use App\Jobs\DeleteDealerTrendyolProducts;
 use App\Jobs\SendDealerTrendyolCatalog;
+use App\Models\Source;
 use App\Services\DealerTrendyolService;
 use Illuminate\Support\Facades\Cache;
 use App\Services\TrendyolCategoryMatcher;
@@ -63,10 +65,12 @@ class DealerTrendyolController extends Controller
         $defaultBrandId = (int) ($catMap['fallback_brand_id'] ?? 0) ?: old('brand_id');
 
         $sendStatus = Cache::get('trendyol_send_status_'.$dealer->id);
+        $deleteStatus = Cache::get('trendyol_delete_status_'.$dealer->id);
+        $sources = Source::query()->orderBy('name')->get(['id', 'name']);
 
         return view('admin.dealers.trendyol', compact(
             'dealer', 'products', 'prices', 'margin', 'listed', 'counts', 'recent', 'batches', 'search',
-            'defaultCategoryId', 'defaultBrandId', 'sendStatus',
+            'defaultCategoryId', 'defaultBrandId', 'sendStatus', 'deleteStatus', 'sources',
         ));
     }
 
@@ -198,6 +202,44 @@ class DealerTrendyolController extends Controller
             'success',
             $n.' Trendyol kuyruğuna alındı. İşlem arka planda sürer; birkaç dakika sonra Sonuç sorgula veya durum kutusunu kontrol edin.'
         );
+    }
+
+
+    public function deleteProducts(Request $request, Dealer $dealer): RedirectResponse
+    {
+        if (! $dealer->hasTrendyolCredentials()) {
+            return $this->back($dealer)->with('error', 'Trendyol API bilgileri eksik.');
+        }
+
+        $data = $request->validate([
+            'scope' => 'required|string',
+            'confirm' => 'required|accepted',
+        ]);
+
+        $scope = $data['scope'];
+        if ($scope === 'all') {
+            $jobScope = 'all';
+            $label = 'tüm Trendyol ürünleri';
+        } elseif (str_starts_with($scope, 'source:')) {
+            $sourceId = (int) substr($scope, 7);
+            if (! Source::query()->whereKey($sourceId)->exists()) {
+                return $this->back($dealer)->with('error', 'XML kaynağı bulunamadı.');
+            }
+            $jobScope = $sourceId;
+            $src = Source::query()->find($sourceId);
+            $label = '«'.($src->name ?? $sourceId).'» kaynağı ürünleri';
+        } else {
+            return $this->back($dealer)->with('error', 'Geçersiz silme kapsamı.');
+        }
+
+        Cache::put('trendyol_delete_status_'.$dealer->id, [
+            'status' => 'queued',
+            'message' => $label.' silme kuyruğunda…',
+        ], now()->addHours(2));
+
+        DeleteDealerTrendyolProducts::dispatch($dealer->id, $jobScope);
+
+        return $this->back($dealer)->with('success', $label.' Trendyol silme kuyruğuna alındı.');
     }
 
     public function checkBatch(Request $request, Dealer $dealer): RedirectResponse

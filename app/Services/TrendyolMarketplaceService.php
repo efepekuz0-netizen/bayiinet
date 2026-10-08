@@ -58,6 +58,21 @@ class TrendyolMarketplaceService
         );
     }
 
+    /**
+     * Trendyol ürün silme — barcode listesi (max ~1000/istek).
+     * @param  list<array{barcode: string}>  $items
+     */
+    public function deleteProducts(MarketplaceConnection $connection, array $items): array
+    {
+        return $this->send(
+            $connection,
+            'DELETE',
+            $this->productPath($connection).'/products',
+            ['items' => array_values($items)],
+            allowEmptyResponse: true,
+        );
+    }
+
     public function batchResult(MarketplaceConnection $connection, string $batchRequestId): array
     {
         return $this->get(
@@ -230,6 +245,8 @@ class TrendyolMarketplaceService
             'GET' => $request->get(self::BASE_URL.$path, $data),
             'POST' => $request->post(self::BASE_URL.$path, $data),
             'PUT' => $request->put(self::BASE_URL.$path, $data),
+            'DELETE' => $request->withBody(json_encode($data, JSON_UNESCAPED_UNICODE), 'application/json')
+                ->delete(self::BASE_URL.$path),
             default => throw new LogicException('Desteklenmeyen Trendyol API isteği.'),
         };
 

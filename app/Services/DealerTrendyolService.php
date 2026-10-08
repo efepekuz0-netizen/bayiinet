@@ -385,6 +385,55 @@ class DealerTrendyolService
         return ['updated' => count($items), 'batches' => $batches];
     }
 
+    /**
+     * Trendyol'dan ürün sil.
+     * @param  'all'|int  $scope  all = tüm listingler, int = source_id
+     * @return array{deleted: int, failed: int, errors: list<string>}
+     */
+    public function deleteFromTrendyol(Dealer $dealer, string|int $scope = 'all'): array
+    {
+        $connection = $this->connection($dealer);
+        $query = DealerTrendyolListing::query()
+            ->where('dealer_id', $dealer->id)
+            ->whereIn('status', ['sent', 'created', 'pending', 'failed']);
+
+        if ($scope !== 'all') {
+            $sourceId = (int) $scope;
+            $query->whereHas('product', fn ($q) => $q->where('source_id', $sourceId));
+        }
+
+        $deleted = 0;
+        $failed = 0;
+        $errors = [];
+
+        $query->orderBy('id')->chunkById(200, function ($listings) use ($connection, $dealer, &$deleted, &$failed, &$errors): void {
+            $items = [];
+            $ids = [];
+            foreach ($listings as $listing) {
+                $bc = trim((string) $listing->barcode);
+                if ($bc === '') {
+                    continue;
+                }
+                $items[] = ['barcode' => $bc];
+                $ids[] = $listing->id;
+            }
+            if ($items === []) {
+                return;
+            }
+            try {
+                $this->api->deleteProducts($connection, $items);
+                DealerTrendyolListing::query()->whereIn('id', $ids)->delete();
+                $deleted += count($ids);
+            } catch (Throwable $e) {
+                $failed += count($ids);
+                $errors[] = $e->getMessage();
+                $dealer->update(['trendyol_last_error' => mb_substr($e->getMessage(), 0, 1000)]);
+            }
+        });
+
+        return ['deleted' => $deleted, 'failed' => $failed, 'errors' => array_values(array_unique($errors))];
+    }
+
     /** Bayinin kâr yüzdesi; tanımlı değilse platform varsayılanı. */
     public function dealerMargin(Dealer $dealer): float
     {

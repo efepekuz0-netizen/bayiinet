@@ -20,7 +20,16 @@ class DealerController extends Controller
             $query->where('status', $status);
         }
 
-        $dealers = $query->paginate(20)->withQueryString();
+        if ($q = trim((string) $request->get('q', ''))) {
+            $query->where(function ($w) use ($q) {
+                $w->where('company_name', 'like', "%{$q}%")
+                    ->orWhere('city', 'like', "%{$q}%")
+                    ->orWhere('phone', 'like', "%{$q}%")
+                    ->orWhereHas('user', fn ($u) => $u->where('email', 'like', "%{$q}%")->orWhere('name', 'like', "%{$q}%"));
+            });
+        }
+
+        $dealers = $query->paginate(24)->withQueryString();
 
         return view('admin.dealers.index', compact('dealers'));
     }

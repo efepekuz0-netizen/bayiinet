@@ -3,7 +3,12 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\DealerTrendyolListing;
+use App\Models\Product;
+use App\Models\ProductVariant;
 use App\Models\Source;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use App\Models\XmlImport;
 use App\Services\XmlImportService;
 use Illuminate\Http\Request;
@@ -128,8 +133,28 @@ class SourceController extends Controller
 
     public function destroy(Source $source)
     {
-        $source->delete();
+        $name = $source->name;
+        $deletedProducts = 0;
 
-        return redirect()->route('admin.sources.index')->with('success', 'Kaynak silindi.');
+        DB::transaction(function () use ($source, &$deletedProducts): void {
+            $productIds = Product::query()->where('source_id', $source->id)->pluck('id');
+            $deletedProducts = $productIds->count();
+
+            if ($deletedProducts > 0) {
+                ProductVariant::query()->whereIn('product_id', $productIds)->delete();
+                // Listing cascade zaten product FK ile silinir; yine de temizlik
+                DealerTrendyolListing::query()->whereIn('product_id', $productIds)->delete();
+                Product::query()->whereIn('id', $productIds)->delete();
+            }
+
+            $source->delete();
+        });
+
+        Cache::forget('xml_feed_catalog');
+
+        return redirect()->route('admin.sources.index')->with(
+            'success',
+            "Kaynak «{$name}» silindi. {$deletedProducts} ürün (ve varyantları) kaldırıldı."
+        );
     }
 }

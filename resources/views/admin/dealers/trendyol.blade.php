@@ -29,6 +29,42 @@
     </div>
 @endif
 
+@if(!empty($deleteStatus))
+    <div class="alert alert-{{ ($deleteStatus['status'] ?? '') === 'error' ? 'danger' : (($deleteStatus['status'] ?? '') === 'done' ? 'success' : 'warning') }} mb-3">
+        <strong>Trendyol silme:</strong> {{ $deleteStatus['message'] ?? '' }}
+        @if(!empty($deleteStatus['deleted'])) · {{ $deleteStatus['deleted'] }} silindi @endif
+    </div>
+@endif
+
+<div class="card border-danger mb-4">
+    <div class="card-header bg-white text-danger fw-semibold">Trendyol ürün sil</div>
+    <div class="card-body">
+        <p class="small text-muted mb-3">Bayinin Trendyol mağazasından ürün kaldırır. Yerel katalog ürünleri silinmez; sadece Trendyol listing + mağaza ürünü.</p>
+        <form method="POST" action="{{ route('admin.dealers.trendyol.delete', $dealer) }}" class="row g-2 align-items-end"
+              onsubmit="return confirm('Seçilen kapsam Trendyol\'dan silinecek. Emin misiniz?')">
+            @csrf
+            <div class="col-md-6">
+                <label class="form-label small">Kapsam</label>
+                <select name="scope" class="form-select" required>
+                    <option value="all">Tüm Trendyol ürünleri (bu bayi)</option>
+                    @foreach($sources ?? [] as $src)
+                        <option value="source:{{ $src->id }}">Sadece XML: {{ $src->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-md-4">
+                <div class="form-check mt-4">
+                    <input class="form-check-input" type="checkbox" name="confirm" value="1" id="delConfirm" required>
+                    <label class="form-check-label small" for="delConfirm">Silmeyi onaylıyorum</label>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-outline-danger w-100">Sil</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 @php
     $statusLabels = ['pending' => 'Hazırlandı', 'sent' => 'Gönderildi', 'created' => 'Trendyol\'da oluştu', 'failed' => 'Hatalı'];
     $statusColors = ['pending' => 'secondary', 'sent' => 'info', 'created' => 'success', 'failed' => 'danger'];

@@ -56,7 +56,7 @@
                         @endif
                     </td>
                     <td>
-                        <form action="{{ route('admin.sources.destroy', $source) }}" method="POST" onsubmit="return confirm('Silmek istediğinize emin misiniz?')">
+                        <form action="{{ route('admin.sources.destroy', $source) }}" method="POST" onsubmit="return confirm('Bu XML kaynağı ve ona bağlı TÜM ürünler silinecek. Emin misiniz?')">
                             @csrf @method('DELETE')
                             <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
                         </form>
