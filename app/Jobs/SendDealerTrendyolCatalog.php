@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Dealer;
+use App\Models\Product;
 use App\Services\DealerTrendyolService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,12 +21,12 @@ class SendDealerTrendyolCatalog implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 3600;
+    public int $timeout = 7200;
 
     public int $tries = 1;
 
     /**
-     * @param  array<int, int>|null  $productIds  null = stoklu aktif tüm ürünler
+     * @param  array<int, int>|null  $productIds  null = stoklu aktif tüm ürünler (limitsiz)
      * @param  array<int, array<string, mixed>>  $attributes
      */
     public function __construct(
@@ -53,45 +54,53 @@ class SendDealerTrendyolCatalog implements ShouldQueue
         Cache::put($cacheKey, [
             'status' => 'running',
             'started_at' => now()->toIso8601String(),
-            'message' => 'Trendyol gönderimi devam ediyor…',
-        ], now()->addHours(2));
+            'message' => 'Trendyol gönderimi başladı…',
+            'sent' => 0,
+            'failed' => 0,
+        ], now()->addHours(4));
 
         $started = microtime(true);
+        $totalSent = 0;
+        $totalFailed = 0;
+        $allBatches = [];
+        $allErrors = [];
 
         try {
-            $productIds = $this->productIds;
-            if ($productIds === null) {
-                $query = \App\Models\Product::query()
-                    ->where('is_active', true)
-                    ->where(function ($q) {
-                        $q->where(function ($plain) {
-                            $plain->where('has_variants', false)->where('stock', '>', 0);
-                        })->orWhere(function ($v) {
-                            $v->where('has_variants', true)
-                                ->whereHas('variants', fn ($s) => $s->where('stock', '>', 0));
-                        });
+            $query = Product::query()
+                ->where('is_active', true)
+                ->where(function ($q) {
+                    $q->where(function ($plain) {
+                        $plain->where('has_variants', false)->where('stock', '>', 0);
+                    })->orWhere(function ($v) {
+                        $v->where('has_variants', true)
+                            ->whereHas('variants', fn ($s) => $s->where('stock', '>', 0));
                     });
+                })
+                ->orderBy('id');
 
-                if ($this->onlyMissing) {
-                    $listed = $dealer->trendyolListings()
-                        ->whereIn('status', ['sent', 'created'])
-                        ->pluck('product_id')
-                        ->unique()
-                        ->all();
-                    if ($listed !== []) {
-                        $query->whereNotIn('id', $listed);
-                    }
-                }
-
-                $productIds = $query->orderBy('id')->limit(5000)->pluck('id')->all();
+            if ($this->productIds !== null) {
+                $query->whereIn('id', $this->productIds);
             }
 
-            if ($productIds === []) {
+            if ($this->onlyMissing) {
+                $listed = $dealer->trendyolListings()
+                    ->whereIn('status', ['sent', 'created', 'pending'])
+                    ->pluck('product_id')
+                    ->unique()
+                    ->filter()
+                    ->all();
+                if ($listed !== []) {
+                    $query->whereNotIn('id', $listed);
+                }
+            }
+
+            $total = (clone $query)->count();
+            if ($total === 0) {
                 Cache::put($cacheKey, [
                     'status' => 'done',
                     'sent' => 0,
                     'failed' => 0,
-                    'message' => 'Gönderilecek yeni ürün yok.',
+                    'message' => 'Gönderilecek ürün yok (stoklu aktif ürün bulunamadı).',
                     'finished_at' => now()->toIso8601String(),
                     'seconds' => 0,
                 ], now()->addHours(6));
@@ -99,36 +108,74 @@ class SendDealerTrendyolCatalog implements ShouldQueue
                 return;
             }
 
-            $result = $trendyol->send(
-                $dealer,
-                $productIds,
-                $this->categoryId,
-                $this->brandId,
-                $this->attributes,
-            );
+            Cache::put($cacheKey, [
+                'status' => 'running',
+                'message' => "0 / {$total} işleniyor…",
+                'sent' => 0,
+                'failed' => 0,
+                'total' => $total,
+                'started_at' => now()->toIso8601String(),
+            ], now()->addHours(4));
+
+            // Limitsiz: 300'lük parçalarda gönder (bellek + API)
+            $processed = 0;
+            $query->select('id')->chunkById(300, function ($rows) use (
+                $trendyol, $dealer, $cacheKey, $total, &$totalSent, &$totalFailed, &$allBatches, &$allErrors, &$processed
+            ) {
+                $ids = $rows->pluck('id')->all();
+                $result = $trendyol->send(
+                    $dealer,
+                    $ids,
+                    $this->categoryId,
+                    $this->brandId,
+                    $this->attributes,
+                );
+
+                $totalSent += $result['sent'];
+                $totalFailed += $result['failed'];
+                $allBatches = array_merge($allBatches, $result['batches'] ?? []);
+                $allErrors = array_merge($allErrors, $result['errors'] ?? []);
+                $processed += count($ids);
+
+                Cache::put($cacheKey, [
+                    'status' => 'running',
+                    'message' => "{$processed} / {$total} işlendi · gönderilen: {$totalSent} · hatalı: {$totalFailed}",
+                    'sent' => $totalSent,
+                    'failed' => $totalFailed,
+                    'total' => $total,
+                    'batches' => array_slice($allBatches, -5),
+                    'errors' => array_slice(array_values(array_unique($allErrors)), 0, 15),
+                    'started_at' => now()->toIso8601String(),
+                ], now()->addHours(4));
+            });
 
             $seconds = round(microtime(true) - $started, 1);
             Cache::put($cacheKey, [
                 'status' => 'done',
-                'sent' => $result['sent'],
-                'failed' => $result['failed'],
-                'batches' => $result['batches'] ?? [],
-                'errors' => array_slice($result['errors'] ?? [], 0, 10),
-                'message' => "{$result['sent']} gönderildi, {$result['failed']} hatalı ({$seconds} sn)",
+                'sent' => $totalSent,
+                'failed' => $totalFailed,
+                'total' => $total,
+                'batches' => array_values(array_unique($allBatches)),
+                'errors' => array_slice(array_values(array_unique($allErrors)), 0, 20),
+                'message' => "{$totalSent} gönderildi, {$totalFailed} hatalı / toplam {$total} ({$seconds} sn)",
                 'finished_at' => now()->toIso8601String(),
                 'seconds' => $seconds,
-            ], now()->addHours(6));
+            ], now()->addHours(12));
 
             Log::info('SendDealerTrendyolCatalog finished', [
                 'dealer_id' => $dealer->id,
-                'sent' => $result['sent'],
-                'failed' => $result['failed'],
+                'sent' => $totalSent,
+                'failed' => $totalFailed,
+                'total' => $total,
                 'seconds' => $seconds,
             ]);
         } catch (Throwable $e) {
             Cache::put($cacheKey, [
                 'status' => 'error',
                 'message' => $e->getMessage(),
+                'sent' => $totalSent,
+                'failed' => $totalFailed,
+                'errors' => array_slice(array_values(array_unique($allErrors)), 0, 20),
                 'finished_at' => now()->toIso8601String(),
             ], now()->addHours(6));
 

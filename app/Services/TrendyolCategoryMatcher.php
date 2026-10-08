@@ -41,6 +41,38 @@ class TrendyolCategoryMatcher
         ['vakum', 'El Süpürgesi'],
         ['bıçak', 'Çakı'],
         ['dolap', 'Ecza Dolabı'],
+        ['magsafe', 'Powerbank'],
+        ['mag safe', 'Powerbank'],
+        ['kablosuz sarj', 'Kablosuz Şarj Cihazı'],
+        ['kablosuz şarj', 'Kablosuz Şarj Cihazı'],
+        ['wireless', 'Kablosuz Şarj Cihazı'],
+        ['ios uyumlu', 'Powerbank'],
+        ['sarj aleti', 'Şarj Aleti'],
+        ['şarj aleti', 'Şarj Aleti'],
+        ['adaptor', 'Şarj Aleti'],
+        ['adaptör', 'Şarj Aleti'],
+        ['kulaklik', 'Kulaklık'],
+        ['kulaklık', 'Kulaklık'],
+        ['bluetooth', 'Kulaklık'],
+        ['telefon kilif', 'Telefon Kılıfı'],
+        ['telefon kılıf', 'Telefon Kılıfı'],
+        ['kılıf', 'Telefon Kılıfı'],
+        ['ekran koruyucu', 'Ekran Koruyucu'],
+        ['temperli', 'Ekran Koruyucu'],
+        ['selfi', 'Selfie Çubuğu'],
+        ['selfie', 'Selfie Çubuğu'],
+        ['tripod', 'Tripod'],
+        ['mouse', 'Mouse'],
+        ['klavye', 'Klavye'],
+        ['hoparlor', 'Hoparlör'],
+        ['hoparlör', 'Hoparlör'],
+        ['speaker', 'Hoparlör'],
+        ['saat', 'Akıllı Saat'],
+        ['akilli saat', 'Akıllı Saat'],
+        ['watch', 'Akıllı Saat'],
+        ['tablet', 'Tablet'],
+        ['kamera', 'Aksiyon Kamera'],
+        ['drone', 'Drone'],
     ];
 
     public function map(): array
@@ -217,7 +249,7 @@ class TrendyolCategoryMatcher
                 $best = $leaf;
             }
         }
-        if ($best && $bestScore >= 2) {
+        if ($best && $bestScore >= 1) {
             $this->remember($xmlPath ?: mb_substr($title, 0, 40), (int) $best['id'], $best['name']);
 
             return ['id' => (int) $best['id'], 'name' => $best['name'], 'reason' => 'score:'.$bestScore];

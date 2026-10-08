@@ -2,12 +2,29 @@
 @section('title', $dealer->company_name.' · Trendyol')
 @section('content')
 @if(!empty($sendStatus))
-    <div class="alert alert-{{ ($sendStatus['status'] ?? '') === 'error' ? 'danger' : (($sendStatus['status'] ?? '') === 'done' ? 'success' : 'info') }} mb-3">
-        <strong>Trendyol gönderim durumu:</strong>
-        {{ $sendStatus['message'] ?? $sendStatus['status'] ?? '' }}
-        @if(!empty($sendStatus['sent'])) · {{ $sendStatus['sent'] }} gönderildi @endif
-        @if(!empty($sendStatus['failed'])) · {{ $sendStatus['failed'] }} hatalı @endif
-        @if(!empty($sendStatus['seconds'])) · {{ $sendStatus['seconds'] }} sn @endif
+    <div class="alert alert-{{ ($sendStatus['status'] ?? '') === 'error' ? 'danger' : (($sendStatus['status'] ?? '') === 'done' ? (($sendStatus['failed'] ?? 0) > 0 && ($sendStatus['sent'] ?? 0) == 0 ? 'warning' : 'success') : 'info') }} mb-3">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+            <div>
+                <strong>Trendyol gönderim:</strong>
+                {{ $sendStatus['message'] ?? $sendStatus['status'] ?? '' }}
+                @if(!empty($sendStatus['total'])) · toplam {{ $sendStatus['total'] }} @endif
+                @if(!empty($sendStatus['seconds'])) · {{ $sendStatus['seconds'] }} sn @endif
+            </div>
+            <span class="badge text-bg-{{ ($sendStatus['status'] ?? '') === 'running' || ($sendStatus['status'] ?? '') === 'queued' ? 'primary' : 'secondary' }}">
+                {{ $sendStatus['status'] ?? '' }}
+            </span>
+        </div>
+        @if(!empty($sendStatus['errors']) && is_array($sendStatus['errors']))
+            <ul class="mb-0 mt-2 small">
+                @foreach(array_slice($sendStatus['errors'], 0, 8) as $err)
+                    <li>{{ $err }}</li>
+                @endforeach
+            </ul>
+        @endif
+        @if(in_array($sendStatus['status'] ?? '', ['running', 'queued'], true))
+            <div class="small text-muted mt-2">Sayfayı 15–30 sn sonra yenileyin; işlem arka planda sürer.</div>
+            <script>setTimeout(function(){ location.reload(); }, 20000);</script>
+        @endif
     </div>
 @endif
 

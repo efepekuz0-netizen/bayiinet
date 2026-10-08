@@ -120,8 +120,17 @@ class XmlImportService
 
             $source->update([
                 'last_imported_at' => now(),
-                'last_product_count' => $this->stats['created'] + $this->stats['updated'],
+                'last_product_count' => $source->products()->count(),
                 'last_error' => null,
+            ]);
+
+            Log::info('XML import completed', [
+                'source_id' => $source->id,
+                'total' => $this->stats['total'],
+                'created' => $this->stats['created'],
+                'updated' => $this->stats['updated'],
+                'skipped' => $this->stats['skipped'],
+                'errors' => $this->stats['errors'],
             ]);
 
             Cache::forget('xml_feed_catalog');
@@ -173,8 +182,9 @@ class XmlImportService
         }
 
         $records = @dns_get_record($host, DNS_A | DNS_AAAA);
+        // DNS çözülemezse engelleme — birçok CDN / dinamik hostta kayıt boş dönebilir
         if ($records === false || $records === []) {
-            return false;
+            return true;
         }
 
         foreach ($records as $record) {
@@ -189,12 +199,10 @@ class XmlImportService
 
     protected function processXml(\SimpleXMLElement $xml, Source $source): void
     {
-        $products = isset($xml->product)
-            ? $xml->product
-            : (isset($xml->products->product) ? $xml->products->product : []);
+        $products = $this->findProductNodes($xml);
 
         if (count($products) === 0) {
-            throw new \RuntimeException('XML içinde ürün listesi bulunamadı. Aktarım alan eşlemesini kontrol edin.');
+            throw new \RuntimeException('XML içinde ürün listesi bulunamadı. Kök düğüm altında product/Product/Urun/item arandı.');
         }
 
         $batch = [];
@@ -205,7 +213,7 @@ class XmlImportService
             } catch (\Throwable $e) {
                 $this->stats['errors']++;
                 $this->errorList[] = [
-                    'stock_code' => $this->xmlText($item, ['stock_code', 'stockCode', 'ProductCode'], 'unknown'),
+                    'stock_code' => $this->xmlText($item, ['stock_code', 'stockCode', 'ProductCode', 'StokKodu', 'code', 'sku'], 'unknown'),
                     'error' => $e->getMessage(),
                 ];
 
@@ -228,9 +236,60 @@ class XmlImportService
         }
     }
 
+    /**
+     * Farklı tedarikçi XML şemalarını destekler.
+     *
+     * @return list<\SimpleXMLElement>
+     */
+    protected function findProductNodes(\SimpleXMLElement $xml): array
+    {
+        $candidates = [];
+
+        $tryLists = [
+            $xml->product ?? null,
+            $xml->Product ?? null,
+            $xml->products->product ?? null,
+            $xml->products->Product ?? null,
+            $xml->Products->Product ?? null,
+            $xml->Products->product ?? null,
+            $xml->Urunler->Urun ?? null,
+            $xml->urunler->urun ?? null,
+            $xml->Urun ?? null,
+            $xml->urun ?? null,
+            $xml->item ?? null,
+            $xml->Item ?? null,
+            $xml->items->item ?? null,
+            $xml->Items->Item ?? null,
+        ];
+
+        foreach ($tryLists as $list) {
+            if ($list === null) {
+                continue;
+            }
+            if ($list instanceof \SimpleXMLElement && count($list) > 0) {
+                foreach ($list as $node) {
+                    $candidates[] = $node;
+                }
+                if ($candidates !== []) {
+                    return $candidates;
+                }
+            }
+        }
+
+        // XPath yedek: herhangi bir product/Product/Urun/item düğümü
+        foreach (['//product', '//Product', '//Urun', '//urun', '//item', '//Item'] as $xpath) {
+            $found = $xml->xpath($xpath) ?: [];
+            if (count($found) > 0) {
+                return array_values($found);
+            }
+        }
+
+        return [];
+    }
+
     protected function parseProduct(\SimpleXMLElement $item, Source $source): ?array
     {
-        $stockCode = $this->xmlText($item, ['stock_code', 'stockCode', 'ProductCode']);
+        $stockCode = $this->xmlText($item, ['stock_code', 'stockCode', 'ProductCode', 'StokKodu', 'stok_kodu', 'code', 'sku', 'SKU', 'StockCode', 'productCode', 'ProductId', 'id']);
         if (empty($stockCode)) {
             $this->stats['skipped']++;
 
@@ -250,19 +309,19 @@ class XmlImportService
             }
         }
 
-        $stock = (int) $this->xmlText($item, ['stock', 'Quantity'], '0');
+        $stock = (int) $this->xmlText($item, ['stock', 'Quantity', 'Stok', 'stok', 'quantity', 'qty', 'Qty', 'Stock'], '0');
         $data = [
             'source_id' => $source->id,
             'stock_code' => $stockCode,
-            'barcode' => $this->xmlText($item, ['barcode', 'Barcode', 'barcod']),
-            'title' => $this->xmlText($item, ['title', 'name', 'ProductName']),
-            'brand' => $this->xmlText($item, ['brand', 'Brand']),
-            'description' => $this->xmlText($item, ['description', 'Description']),
+            'barcode' => $this->xmlText($item, ['barcode', 'Barcode', 'barcod', 'Barkod', 'barkod', 'ean', 'EAN']),
+            'title' => $this->xmlText($item, ['title', 'name', 'ProductName', 'UrunAdi', 'urun_adi', 'Name', 'baslik', 'Title']),
+            'brand' => $this->xmlText($item, ['brand', 'Brand', 'Marka', 'marka', 'manufacturer', 'Manufacturer']),
+            'description' => $this->xmlText($item, ['description', 'Description', 'Aciklama', 'aciklama', 'Detail', 'detail']),
             'main_category' => $this->xmlText($item, ['main_category']),
             'sub_category' => $this->xmlText($item, ['sub_category']),
             'category_path' => $this->xmlText($item, ['category', 'Category']),
-            'price' => (float) str_replace(',', '.', $this->xmlText($item, ['sale_price', 'price', 'Price'], '0')),
-            'cost_price' => (float) str_replace(',', '.', $this->xmlText($item, ['cost_price', 'sale_price', 'price', 'Price'], '0')),
+            'price' => (float) str_replace(',', '.', $this->xmlText($item, ['sale_price', 'price', 'Price', 'Fiyat', 'fiyat', 'bayi_fiyat', 'BayiFiyat', 'alis_fiyat', 'AlisFiyat'], '0')),
+            'cost_price' => (float) str_replace(',', '.', $this->xmlText($item, ['cost_price', 'sale_price', 'price', 'Price', 'Fiyat', 'fiyat', 'bayi_fiyat', 'BayiFiyat', 'alis_fiyat'], '0')),
             'list_price' => $this->xmlText($item, ['list_price', 'retail_price']) !== ''
                 ? (float) str_replace(',', '.', $this->xmlText($item, ['list_price', 'retail_price']))
                 : null,

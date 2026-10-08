@@ -103,7 +103,7 @@ class DealerTrendyolService
                 continue;
             }
 
-            // Marka: ürün markası → API arama → varsayılan
+            // Marka: ürün markası → API → varsayılan → "Diğer"
             $productBrandId = $defaultBrand;
             $brandName = trim((string) ($product->brand ?? ''));
             if ($brandName !== '') {
@@ -124,8 +124,24 @@ class DealerTrendyolService
                 }
             }
             if (! $productBrandId) {
+                if (! array_key_exists('__diger__', $brandCache)) {
+                    try {
+                        $brandCache['__diger__'] = Cache::remember(
+                            'trendyol_brand_diger',
+                            now()->addDays(30),
+                            fn () => $this->api->findBrandId($connection, 'Diğer')
+                                ?: $this->api->findBrandId($connection, 'Diger')
+                                ?: $this->api->findBrandId($connection, 'Other')
+                        );
+                    } catch (Throwable $e) {
+                        $brandCache['__diger__'] = null;
+                    }
+                }
+                $productBrandId = $brandCache['__diger__'] ?: $defaultBrand;
+            }
+            if (! $productBrandId) {
                 $failed++;
-                $errors[] = ($product->stock_code ?: $product->id).': marka bulunamadı (ürün markası: '.($brandName ?: 'boş').'). Bir kez varsayılan Marka No girin veya ürün markasını doldurun.';
+                $errors[] = ($product->stock_code ?: $product->id).': marka bulunamadı. Trendyol sayfasında bir kez varsayılan Marka No girip kaydedin.';
                 continue;
             }
 

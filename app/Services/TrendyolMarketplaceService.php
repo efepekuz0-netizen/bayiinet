@@ -239,10 +239,22 @@ class TrendyolMarketplaceService
     private function decode(Response $response, bool $allowEmptyResponse): array
     {
         if (! $response->successful()) {
+            $body = $response->json();
+            $detail = '';
+            if (is_array($body)) {
+                $detail = (string) ($body['message'] ?? $body['error'] ?? $body['errors'][0]['message'] ?? '');
+                if ($detail === '' && isset($body['errors']) && is_array($body['errors'])) {
+                    $detail = json_encode($body['errors'], JSON_UNESCAPED_UNICODE);
+                }
+            }
+            if ($detail === '') {
+                $detail = mb_substr(trim($response->body()), 0, 300);
+            }
+
             $message = match ($response->status()) {
                 401, 403 => 'Trendyol kimlik doğrulaması başarısız. Mağaza numarası ve API bilgilerini kontrol edin.',
                 429 => 'Trendyol istek sınırına ulaşıldı. Biraz bekleyip tekrar deneyin.',
-                default => 'Trendyol API isteği başarısız oldu (HTTP '.$response->status().').',
+                default => 'Trendyol API hatası (HTTP '.$response->status().')'.($detail !== '' ? ': '.$detail : ''),
             };
 
             throw new MarketplaceApiException($response->status(), $message);

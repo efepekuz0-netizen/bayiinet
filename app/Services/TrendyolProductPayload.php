@@ -71,6 +71,13 @@ class TrendyolProductPayload
         $images = [];
         foreach ((array) ($d['images'] ?? []) as $url) {
             $url = trim((string) $url);
+            if ($url === '') {
+                continue;
+            }
+            // http → https dene (Trendyol yalnızca https kabul eder)
+            if (str_starts_with(strtolower($url), 'http://')) {
+                $url = 'https://'.substr($url, 7);
+            }
             if (str_starts_with(strtolower($url), 'https://') && ! in_array($url, array_column($images, 'url'), true)) {
                 $images[] = ['url' => $url];
             }
@@ -79,7 +86,7 @@ class TrendyolProductPayload
             }
         }
         if ($images === []) {
-            throw new InvalidArgumentException('Trendyol için en az bir https:// görsel adresi gerekli.');
+            throw new InvalidArgumentException('Trendyol için en az bir https görsel adresi gerekli.');
         }
 
         $description = trim((string) ($d['description'] ?? ''));
