@@ -13,6 +13,12 @@
     .product-card img { width:100%; height:180px; object-fit:cover; background:#f1f5f9; }
     .product-card .price { color:#2563eb; font-weight:800; font-size:1.05rem; }
     .badge-stock { font-size:.72rem; }
+    @media (max-width: 575.98px) {
+        .pd-price { font-size: 1.4rem; }
+        .pd-gallery .main-img { height: min(320px, 70vw); }
+        .pd-thumbs img { width: 56px; height: 56px; }
+        h1.h3 { font-size: 1.15rem; }
+    }
 </style>
 @endpush
 @section('content')

@@ -1,9 +1,9 @@
 @extends('layouts.app')
 @section('title', 'Giriş')
 @section('content')
-<div class="container py-5">
+<div class="container py-4 px-3">
     <div class="row justify-content-center">
-        <div class="col-md-5">
+        <div class="col-12 col-sm-10 col-md-6 col-lg-5">
             <div class="card shadow">
                 <div class="card-body p-4">
                     <h3 class="text-center mb-4">Bayiinet Giriş</h3>

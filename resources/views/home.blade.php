@@ -2,7 +2,8 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#2563eb">
     <title>Bayiinet — XML Bayilik & Stoksuz E-Ticaret</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
@@ -39,9 +40,39 @@
         .feature-box i { font-size: 1.6rem; color: var(--brand); }
         footer { background: var(--ink); color: #94a3b8; padding: 2.5rem 0; margin-top: 3rem; }
         footer a { color: #cbd5e1; text-decoration: none; }
-    </style>
+    
+        /* Mobile */
+        .form-control { font-size: 16px; }
+        .navbar-main { padding: .65rem 0; }
+        .navbar-main .container { flex-wrap: wrap; }
+        .mobile-search { display: none; width: 100%; margin-top: .65rem; }
+        .cat-scroll {
+            display: flex; flex-wrap: nowrap; overflow-x: auto; gap: .35rem;
+            padding-bottom: .35rem; -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+        .cat-scroll::-webkit-scrollbar { display: none; }
+        .cat-scroll .cat-chip { flex: 0 0 auto; white-space: nowrap; }
+        .product-card img { height: 160px; }
+        @media (max-width: 767.98px) {
+            .topbar { font-size: .72rem; }
+            .hero { padding: 1.75rem 0 1.25rem; }
+            .hero h1 { font-size: 1.55rem; }
+            .hero .btn { width: 100%; margin-bottom: .4rem; }
+            .hero .d-flex.gap-2 { flex-direction: column; }
+            .mobile-search { display: block; }
+            .product-card img { height: 140px; }
+            .product-card .price { font-size: 1rem; }
+            .section-title { font-size: 1.15rem; }
+            footer { padding: 1.75rem 0; margin-top: 2rem; }
+            .feature-box { padding: 1rem; }
+        }
+        @media (min-width: 768px) {
+            .mobile-search { display: none !important; }
+        }
+</style>
 </head>
-<body>
+<body class="@auth @if(auth()->user()->isDealer() && auth()->user()->dealer?->isActive()) has-bottom-nav @endif @endauth">
 <div class="topbar">
     <div class="container d-flex justify-content-between">
         <span><i class="bi bi-truck me-1"></i> Stoksuz satış · XML ile otomatik güncelleme · Aynı gün kargo desteği</span>
@@ -58,23 +89,30 @@
                 <button class="btn btn-primary"><i class="bi bi-search"></i></button>
             </div>
         </form>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-shrink-0">
             @auth
                 @if(auth()->user()->isAdmin())
-                    <a href="{{ route('admin.dashboard') }}" class="btn btn-outline-primary btn-sm">Admin Panel</a>
-                @else
-                    <a href="{{ route('home') }}" class="btn btn-outline-primary btn-sm">Ürünlere dön</a>
+                    <a href="{{ route('admin.dashboard') }}" class="btn btn-outline-primary btn-sm">Admin</a>
+                @elseif(auth()->user()->isDealer())
+                    <a href="{{ route('dealer.account') }}" class="btn btn-outline-primary btn-sm">Hesabım</a>
                 @endif
             @else
                 <a href="{{ route('login') }}" class="btn btn-outline-secondary btn-sm">Giriş</a>
-                <a href="{{ route('register') }}" class="btn btn-primary btn-sm">Bayilik Başvurusu</a>
+                <a href="{{ route('register') }}" class="btn btn-primary btn-sm d-none d-sm-inline-flex">Başvuru</a>
+                <a href="{{ route('register') }}" class="btn btn-primary btn-sm d-sm-none"><i class="bi bi-person-plus"></i></a>
             @endauth
         </div>
+        <form action="{{ route('home') }}" method="GET" class="mobile-search">
+            <div class="input-group">
+                <input type="text" name="q" class="form-control" placeholder="Ürün, marka, stok kodu..." value="{{ request('q') }}">
+                <button class="btn btn-primary" type="submit"><i class="bi bi-search"></i></button>
+            </div>
+        </form>
     </div>
 </nav>
 @if(auth()->check() && auth()->user()->isDealer() && auth()->user()->dealer?->isActive())
 <div class="border-bottom bg-white">
-    <div class="container d-flex justify-content-center gap-4 py-2 small">
+    <div class="container d-flex justify-content-start justify-content-md-center gap-3 gap-md-4 py-2 small overflow-auto" style="-webkit-overflow-scrolling:touch">
         <a href="{{ route('home') }}" class="text-decoration-none {{ request()->routeIs('home') ? 'fw-bold text-primary' : 'text-secondary' }}"><i class="bi bi-house me-1"></i>Ana Sayfa</a>
         <a href="#urunler" class="text-decoration-none text-secondary"><i class="bi bi-box-seam me-1"></i>Ürünler</a>
         <a href="{{ route('dealer.orders.index') }}" class="text-decoration-none {{ request()->routeIs('dealer.orders.*') ? 'fw-bold text-primary' : 'text-secondary' }}"><i class="bi bi-receipt me-1"></i>Siparişler</a>
@@ -191,9 +229,10 @@
     @endauth
 </div>
 <style>
-.dealer-bottom-nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e2e8f0;z-index:1050;display:flex;justify-content:space-around;padding:.45rem 0 calc(.45rem + env(safe-area-inset-bottom));box-shadow:0 -3px 14px rgba(15,23,42,.08)}
-.dealer-bottom-nav a{color:#64748b;text-decoration:none;text-align:center;font-size:.7rem;display:flex;flex-direction:column;gap:.1rem}.dealer-bottom-nav i{font-size:1.1rem}.dealer-bottom-nav a:hover{color:#2563eb}
-@media(max-width:767px){body{padding-bottom:65px}}
+.dealer-bottom-nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e2e8f0;z-index:1050;display:none;justify-content:space-around;padding:.4rem 0 calc(.4rem + env(safe-area-inset-bottom));box-shadow:0 -3px 14px rgba(15,23,42,.08)}
+.dealer-bottom-nav a{color:#64748b;text-decoration:none;text-align:center;font-size:.68rem;display:flex;flex-direction:column;align-items:center;gap:.12rem;padding:.25rem .5rem;min-width:64px;min-height:48px;justify-content:center}
+.dealer-bottom-nav i{font-size:1.2rem}.dealer-bottom-nav a:hover,.dealer-bottom-nav a.active{color:#2563eb}
+@media(max-width:767.98px){.dealer-bottom-nav{display:flex}body.has-bottom-nav{padding-bottom:72px}}
 </style>
 </body>
 </html>
