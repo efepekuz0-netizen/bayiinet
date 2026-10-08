@@ -152,6 +152,11 @@
                     @csrf
                     <button class="btn btn-outline-success btn-sm" @disabled(! $dealer->hasTrendyolCredentials())>Fiyat ve stokları şimdi eşitle</button>
                 </form>
+                <form method="POST" action="{{ route('admin.dealers.trendyol.recheck', $dealer) }}" class="mt-2">
+                    @csrf
+                    <button class="btn btn-warning btn-sm w-100">Gönderildi olanları kontrol et (Trendyol sonucu)</button>
+                    <div class="form-text">«Gönderildi» ama «Trendyol'da oluştu» 0 ise buna bas — gerçek kabul/red durumunu çeker.</div>
+                </form>
             </div>
         </div>
     </div>

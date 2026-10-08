@@ -278,6 +278,29 @@ class DealerTrendyolController extends Controller
         return $this->back($dealer)->with('success', $label.' Trendyol silme kuyruğuna alındı.');
     }
 
+
+    public function recheckBatches(Dealer $dealer): RedirectResponse
+    {
+        try {
+            $result = $this->trendyol->recheckSentBatches($dealer);
+        } catch (\LogicException $e) {
+            return $this->back($dealer)->with('error', $e->getMessage());
+        } catch (\Throwable $e) {
+            report($e);
+            return $this->back($dealer)->with('error', 'Kontrol başarısız: '.$e->getMessage());
+        }
+
+        $msg = "{$result['batches']} batch kontrol: {$result['created']} oluştu, {$result['failed']} hatalı, {$result['pending']} bekliyor.";
+        if (! empty($result['errors'])) {
+            $msg .= ' Örnek: '.implode(' | ', array_slice($result['errors'], 0, 3));
+        }
+
+        return $this->back($dealer)->with(
+            ($result['created'] > 0 || $result['failed'] > 0) ? 'success' : 'error',
+            $msg
+        );
+    }
+
     public function checkBatch(Request $request, Dealer $dealer): RedirectResponse
     {
         $data = $request->validate(['batch_request_id' => 'required|string|max:100']);

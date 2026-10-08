@@ -260,20 +260,24 @@ class DealerTrendyolService
 
                 if ($batchId !== '') {
                     $batches[] = $batchId;
-                    // Trendyol batch sonucu (1–3 sn bekleyip oku)
-                    usleep(1500000);
-                    try {
-                        $verify = $this->applyBatchResult($dealer, $connection, $batchId, $barcodeToListing);
-                        $sent += $verify['created'];
-                        $failed += $verify['failed'];
-                        $errors = array_merge($errors, $verify['errors']);
-                    } catch (Throwable $ve) {
-                        // Sonuç henüz hazır değilse sent say; sonra «Sonuç sorgula»
-                        $sent += count($chunk);
-                        $errors[] = 'Batch '.$batchId.': sonuç bekleniyor ('.$ve->getMessage().')';
+                    // Batch sonucu gelene kadar birkaç kez dene (Trendyol genelde 2–15 sn)
+                    $verify = $this->waitAndApplyBatchResult($dealer, $connection, $batchId, $barcodeToListing);
+                    $sent += $verify['created'];
+                    $failed += $verify['failed'];
+                    $errors = array_merge($errors, $verify['errors']);
+                    if ($verify['pending']) {
+                        // Arka planda tekrar kontrol
+                        \App\Jobs\VerifyTrendyolBatch::dispatch($dealer->id, $batchId)
+                            ->delay(now()->addSeconds(20));
                     }
                 } else {
-                    $sent += count($chunk);
+                    // batchRequestId yoksa gerçekten kabul edilmemiş say
+                    $failed += count($chunk);
+                    $errors[] = 'Trendyol batchRequestId dönmedi — istek reddedilmiş olabilir.';
+                    DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
+                        'status' => 'failed',
+                        'error' => 'batchRequestId yok',
+                    ]);
                 }
             } catch (Throwable $e) {
                 DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
@@ -310,6 +314,60 @@ class DealerTrendyolService
      *
      * @return array{status: string, created: int, failed: int}
      */
+    /**
+     * status=sent olan tüm listing'lerin batch sonuçlarını yeniden sorgula.
+     * @return array{batches: int, created: int, failed: int, pending: int, errors: list<string>}
+     */
+    public function recheckSentBatches(Dealer $dealer): array
+    {
+        $connection = $this->connection($dealer);
+        $batchIds = DealerTrendyolListing::query()
+            ->where('dealer_id', $dealer->id)
+            ->where('status', 'sent')
+            ->whereNotNull('batch_request_id')
+            ->distinct()
+            ->pluck('batch_request_id')
+            ->filter()
+            ->values()
+            ->all();
+
+        $created = 0;
+        $failed = 0;
+        $pending = 0;
+        $errors = [];
+
+        foreach ($batchIds as $batchId) {
+            $listings = DealerTrendyolListing::query()
+                ->where('dealer_id', $dealer->id)
+                ->where('batch_request_id', $batchId)
+                ->where('status', 'sent')
+                ->get();
+            $map = [];
+            foreach ($listings as $l) {
+                $map[(string) $l->barcode] = $l->id;
+            }
+            try {
+                $v = $this->applyBatchResult($dealer, $connection, (string) $batchId, $map);
+                $created += $v['created'];
+                $failed += $v['failed'];
+                $errors = array_merge($errors, $v['errors']);
+            } catch (Throwable $e) {
+                $pending++;
+                if (count($errors) < 10) {
+                    $errors[] = $batchId.': '.$e->getMessage();
+                }
+            }
+        }
+
+        return [
+            'batches' => count($batchIds),
+            'created' => $created,
+            'failed' => $failed,
+            'pending' => $pending,
+            'errors' => array_slice(array_values(array_unique($errors)), 0, 20),
+        ];
+    }
+
     public function checkBatch(Dealer $dealer, string $batchRequestId): array
     {
         $result = $this->api->batchResult($this->connection($dealer), $batchRequestId);
@@ -332,7 +390,8 @@ class DealerTrendyolService
                 continue;
             }
 
-            if (strtoupper((string) data_get($row, 'status')) === 'SUCCESS') {
+            $st = strtoupper((string) (data_get($row, 'status') ?? data_get($row, 'itemStatus') ?? ''));
+            if (in_array($st, ['SUCCESS', 'SUCCESSFUL', 'CREATED', 'APPROVED'], true)) {
                 $listing->update(['status' => 'created', 'error' => null, 'checked_at' => now()]);
                 $created++;
             } else {
@@ -754,6 +813,44 @@ class DealerTrendyolService
         return ['Diğer', 'Plastik', 'Metal'];
     }
 
+    /**
+     * Batch sonucunu birkaç denemede oku.
+     * @param  array<string, int>  $barcodeToListing
+     * @return array{created: int, failed: int, errors: list<string>, pending: bool}
+     */
+    private function waitAndApplyBatchResult(
+        Dealer $dealer,
+        MarketplaceConnection $connection,
+        string $batchId,
+        array $barcodeToListing,
+        int $attempts = 6,
+        int $sleepMs = 2500,
+    ): array {
+        $lastError = '';
+        for ($i = 0; $i < $attempts; $i++) {
+            if ($i > 0) {
+                usleep($sleepMs * 1000);
+            } else {
+                usleep(1200000); // ilk bekleme ~1.2s
+            }
+            try {
+                $result = $this->applyBatchResult($dealer, $connection, $batchId, $barcodeToListing);
+                $result['pending'] = false;
+
+                return $result;
+            } catch (Throwable $e) {
+                $lastError = $e->getMessage();
+            }
+        }
+
+        return [
+            'created' => 0,
+            'failed' => 0,
+            'errors' => ['Batch '.$batchId.' henüz hazır değil: '.$lastError.' — arka planda tekrar kontrol edilecek.'],
+            'pending' => true,
+        ];
+    }
+
     private function applyBatchResult(Dealer $dealer, MarketplaceConnection $connection, string $batchId, array $barcodeToListing): array
     {
         $result = $this->api->batchResult($connection, $batchId);
@@ -800,8 +897,17 @@ class DealerTrendyolService
             }
 
             $listingId = $barcodeToListing[$barcode] ?? null;
-            $ok = in_array($status, ['SUCCESS', 'SUCCESSFUL', 'CREATED', 'APPROVED'], true)
-                || ($status === '' && $failure === '');
+            // Trendyol bazen status=SUCCESS, bazen sadece failureReasons dolu gelir
+            $ok = in_array($status, ['SUCCESS', 'SUCCESSFUL', 'CREATED', 'APPROVED'], true);
+            if (! $ok && $status === '' && $failure === '') {
+                $ok = true; // belirsiz ama hata yok
+            }
+            if ($failure !== '' && ! $ok) {
+                $ok = false;
+            }
+            if (in_array($status, ['FAILED', 'FAIL', 'ERROR', 'REJECTED'], true)) {
+                $ok = false;
+            }
 
             if ($ok) {
                 $created++;
