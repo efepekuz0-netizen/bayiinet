@@ -8,6 +8,7 @@
                 <strong>Trendyol gönderim:</strong>
                 {{ $sendStatus['message'] ?? $sendStatus['status'] ?? '' }}
                 @if(!empty($sendStatus['total'])) · toplam {{ $sendStatus['total'] }} @endif
+                @if(!empty($sendStatus['batches_done'])) · parça {{ $sendStatus['batches_done'] }}/{{ $sendStatus['total_batches'] ?? '?' }} @endif
                 @if(!empty($sendStatus['seconds'])) · {{ $sendStatus['seconds'] }} sn @endif
             </div>
             <span class="badge text-bg-{{ ($sendStatus['status'] ?? '') === 'running' || ($sendStatus['status'] ?? '') === 'queued' ? 'primary' : 'secondary' }}">

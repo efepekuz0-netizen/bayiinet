@@ -222,8 +222,8 @@ class TrendyolMarketplaceService
         $request = Http::withBasicAuth($apiKey, $apiSecret)
             ->withHeaders(['User-Agent' => $connection->account_id.' - SelfIntegration'])
             ->acceptJson()
-            ->connectTimeout(10)
-            ->timeout(60)
+            ->connectTimeout(8)
+            ->timeout(25)
             ->withoutRedirecting();
 
         $response = match ($method) {

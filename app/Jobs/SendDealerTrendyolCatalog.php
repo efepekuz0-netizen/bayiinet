@@ -4,7 +4,6 @@ namespace App\Jobs;
 
 use App\Models\Dealer;
 use App\Models\Product;
-use App\Services\DealerTrendyolService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -15,6 +14,10 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
+/**
+ * Orchestrator: ürün id'lerini toplar, küçük batch job'lara böler, hemen biter.
+ * Asıl API işi SendDealerTrendyolBatch'te.
+ */
 class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable;
@@ -22,18 +25,18 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
-    /** Worker timeout'undan kısa olmalı; uzun katalog chunk'larla ilerler */
-    public int $timeout = 900;
+    public int $timeout = 120;
 
     public int $tries = 1;
 
     public int $maxExceptions = 1;
 
-    /** Aynı bayi için eşzamanlı ikinci gönderimi engelle (saniye) */
-    public int $uniqueFor = 1800;
+    public int $uniqueFor = 600;
+
+    public const BATCH_SIZE = 40;
 
     /**
-     * @param  array<int, int>|null  $productIds  null = stoklu aktif tüm ürünler
+     * @param  array<int, int>|null  $productIds
      * @param  array<int, array<string, mixed>>  $attributes
      */
     public function __construct(
@@ -53,33 +56,18 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
         return 'trendyol-send-'.$this->dealerId;
     }
 
-    public function handle(DealerTrendyolService $trendyol): void
+    public function handle(): void
     {
         $dealer = Dealer::query()->find($this->dealerId);
         if (! $dealer || ! $dealer->hasTrendyolCredentials()) {
-            $this->writeStatus($this->dealerId, [
+            Cache::put('trendyol_send_status_'.$this->dealerId, [
                 'status' => 'error',
-                'message' => 'Bayi bulunamadı veya Trendyol API bilgileri eksik.',
+                'message' => 'Bayi veya Trendyol API bilgisi yok.',
                 'finished_at' => now()->toIso8601String(),
-            ]);
+            ], now()->addHours(6));
 
             return;
         }
-
-        $cacheKey = 'trendyol_send_status_'.$dealer->id;
-        $this->writeStatus($dealer->id, [
-            'status' => 'running',
-            'started_at' => now()->toIso8601String(),
-            'message' => 'Trendyol gönderimi başladı…',
-            'sent' => 0,
-            'failed' => 0,
-        ]);
-
-        $started = microtime(true);
-        $totalSent = 0;
-        $totalFailed = 0;
-        $allBatches = [];
-        $allErrors = [];
 
         try {
             $query = Product::query()
@@ -110,102 +98,64 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
                 }
             }
 
-            $total = (clone $query)->count();
+            $ids = $query->pluck('id')->all();
+            $total = count($ids);
+
             if ($total === 0) {
-                $this->writeStatus($dealer->id, [
+                Cache::put('trendyol_send_status_'.$dealer->id, [
                     'status' => 'done',
                     'sent' => 0,
                     'failed' => 0,
-                    'message' => 'Gönderilecek ürün yok (stoklu aktif ürün bulunamadı).',
+                    'processed' => 0,
+                    'total' => 0,
+                    'message' => 'Gönderilecek ürün yok.',
                     'finished_at' => now()->toIso8601String(),
-                    'seconds' => 0,
-                ]);
+                ], now()->addHours(12));
 
                 return;
             }
 
-            $this->writeStatus($dealer->id, [
+            $chunks = array_chunk($ids, self::BATCH_SIZE);
+            $totalBatches = count($chunks);
+
+            Cache::put('trendyol_send_status_'.$dealer->id, [
                 'status' => 'running',
-                'message' => "0 / {$total} işleniyor…",
                 'sent' => 0,
                 'failed' => 0,
+                'processed' => 0,
                 'total' => $total,
+                'batches_done' => 0,
+                'total_batches' => $totalBatches,
+                'errors' => [],
+                'batch_ids' => [],
+                'message' => "0 / {$total} kuyruğa alındı ({$totalBatches} parça)…",
                 'started_at' => now()->toIso8601String(),
-            ]);
+            ], now()->addHours(12));
 
-            $processed = 0;
-            // Küçük parçalar: timeout / retry_after çakışmasını önler
-            $query->select('id')->chunkById(100, function ($rows) use (
-                $trendyol, $dealer, $total, &$totalSent, &$totalFailed, &$allBatches, &$allErrors, &$processed
-            ) {
-                $ids = $rows->pluck('id')->all();
-                try {
-                    $result = $trendyol->send(
-                        $dealer,
-                        $ids,
-                        $this->categoryId,
-                        $this->brandId,
-                        $this->attributes,
-                    );
-                    $totalSent += $result['sent'];
-                    $totalFailed += $result['failed'];
-                    $allBatches = array_merge($allBatches, $result['batches'] ?? []);
-                    $allErrors = array_merge($allErrors, $result['errors'] ?? []);
-                } catch (Throwable $chunkError) {
-                    $totalFailed += count($ids);
-                    $allErrors[] = $chunkError->getMessage();
-                    Log::warning('Trendyol chunk failed', [
-                        'dealer_id' => $dealer->id,
-                        'error' => $chunkError->getMessage(),
-                    ]);
-                }
+            foreach ($chunks as $i => $chunk) {
+                SendDealerTrendyolBatch::dispatch(
+                    $dealer->id,
+                    array_values($chunk),
+                    $this->categoryId,
+                    $this->brandId,
+                    $this->attributes,
+                    $i,
+                    $totalBatches,
+                )->delay(now()->addSeconds(min($i * 1, 120)));
+            }
 
-                $processed += count($ids);
-                $this->writeStatus($dealer->id, [
-                    'status' => 'running',
-                    'message' => "{$processed} / {$total} işlendi · gönderilen: {$totalSent} · hatalı: {$totalFailed}",
-                    'sent' => $totalSent,
-                    'failed' => $totalFailed,
-                    'total' => $total,
-                    'batches' => array_slice($allBatches, -5),
-                    'errors' => array_slice(array_values(array_unique($allErrors)), 0, 15),
-                    'started_at' => now()->toIso8601String(),
-                ]);
-            });
-
-            $seconds = round(microtime(true) - $started, 1);
-            $this->writeStatus($dealer->id, [
-                'status' => 'done',
-                'sent' => $totalSent,
-                'failed' => $totalFailed,
-                'total' => $total,
-                'batches' => array_values(array_unique($allBatches)),
-                'errors' => array_slice(array_values(array_unique($allErrors)), 0, 20),
-                'message' => "{$totalSent} gönderildi, {$totalFailed} hatalı / toplam {$total} ({$seconds} sn)",
-                'finished_at' => now()->toIso8601String(),
-                'seconds' => $seconds,
-            ]);
-
-            Log::info('SendDealerTrendyolCatalog finished', [
+            Log::info('SendDealerTrendyolCatalog dispatched batches', [
                 'dealer_id' => $dealer->id,
-                'sent' => $totalSent,
-                'failed' => $totalFailed,
                 'total' => $total,
-                'seconds' => $seconds,
+                'batches' => $totalBatches,
             ]);
         } catch (Throwable $e) {
-            // Asla tekrar fırlatma → "attempted too many times" olmaz
-            $this->writeStatus($dealer->id, [
+            Cache::put('trendyol_send_status_'.$this->dealerId, [
                 'status' => 'error',
                 'message' => $e->getMessage(),
-                'sent' => $totalSent,
-                'failed' => $totalFailed,
-                'errors' => array_slice(array_values(array_unique(array_merge($allErrors, [$e->getMessage()]))), 0, 20),
                 'finished_at' => now()->toIso8601String(),
-            ]);
-
-            $dealer->update(['trendyol_last_error' => mb_substr($e->getMessage(), 0, 1000)]);
-            Log::error('SendDealerTrendyolCatalog failed', [
+            ], now()->addHours(6));
+            Log::error('SendDealerTrendyolCatalog orchestrator failed', [
                 'dealer_id' => $this->dealerId,
                 'error' => $e->getMessage(),
             ]);
@@ -214,16 +164,10 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
 
     public function failed(?Throwable $exception): void
     {
-        $this->writeStatus($this->dealerId, [
+        Cache::put('trendyol_send_status_'.$this->dealerId, [
             'status' => 'error',
-            'message' => $exception?->getMessage() ?? 'İş kuyruğu başarısız oldu. Tekrar deneyin.',
+            'message' => $exception?->getMessage() ?? 'Orchestrator başarısız',
             'finished_at' => now()->toIso8601String(),
-        ]);
-    }
-
-    /** @param  array<string, mixed>  $data */
-    private function writeStatus(int $dealerId, array $data): void
-    {
-        Cache::put('trendyol_send_status_'.$dealerId, $data, now()->addHours(12));
+        ], now()->addHours(6));
     }
 }
