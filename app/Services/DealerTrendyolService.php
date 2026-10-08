@@ -85,11 +85,13 @@ class DealerTrendyolService
         }
 
         $brandCache = [];
+        // Masaüstü product_onboard: BRAND_ID varsayılanı
         $defaultBrand = $brandId && $brandId > 0
             ? $brandId
-            : ($this->categoryMatcher->fallbackBrandId() ?: null);
+            : ($this->categoryMatcher->fallbackBrandId() ?: 2613880);
 
-        $ready = [];
+        $readyCreate = [];
+        $readyUpdate = [];
         $failed = 0;
         $errors = [];
 
@@ -147,6 +149,13 @@ class DealerTrendyolService
                 $list = max((float) ($product->list_price ?? 0), $sale);
                 $quantity = $this->quantityFor($product, $variant);
 
+                $existing = DealerTrendyolListing::query()
+                    ->where('dealer_id', $dealer->id)
+                    ->where('barcode', $barcode)
+                    ->first();
+
+                $alreadyOnTy = $existing && in_array($existing->status, ['sent', 'created'], true);
+
                 $listing = DealerTrendyolListing::query()->updateOrCreate(
                     ['dealer_id' => $dealer->id, 'barcode' => $barcode],
                     [
@@ -157,11 +166,24 @@ class DealerTrendyolService
                         'quantity' => $quantity,
                         'category_id' => $productCategoryId,
                         'brand_id' => $productBrandId,
-                        'status' => 'pending',
-                        'batch_request_id' => null,
+                        'status' => $alreadyOnTy ? $existing->status : 'pending',
                         'error' => null,
                     ],
                 );
+
+                // Mevcut Trendyol ürünü → sadece fiyat/stok güncelle (masaüstü mantığı)
+                if ($alreadyOnTy) {
+                    $readyUpdate[] = [
+                        'listing' => $listing,
+                        'item' => [
+                            'barcode' => $barcode,
+                            'quantity' => $quantity,
+                            'salePrice' => $sale,
+                            'listPrice' => $list,
+                        ],
+                    ];
+                    continue;
+                }
 
                 try {
                     $item = TrendyolProductPayload::item([
@@ -187,14 +209,15 @@ class DealerTrendyolService
                     continue;
                 }
 
-                $ready[] = ['listing' => $listing, 'item' => $item];
+                $readyCreate[] = ['listing' => $listing, 'item' => $item];
             }
         }
 
         $sent = 0;
         $batches = [];
 
-        foreach (array_chunk($ready, self::CHUNK_SIZE) as $chunk) {
+        // Yeni ürün oluştur
+        foreach (array_chunk($readyCreate, self::CHUNK_SIZE) as $chunk) {
             $items = array_column($chunk, 'item');
             $listingIds = array_map(fn (array $row) => $row['listing']->id, $chunk);
 
@@ -221,6 +244,22 @@ class DealerTrendyolService
                 $failed += count($chunk);
                 $errors[] = $e->getMessage();
                 $dealer->update(['trendyol_last_error' => mb_substr($e->getMessage(), 0, 1000)]);
+            }
+        }
+
+        // Mevcut ürün fiyat/stok güncelle
+        foreach (array_chunk($readyUpdate, 1000) as $chunk) {
+            $items = array_column($chunk, 'item');
+            try {
+                $response = $this->api->updatePriceAndInventory($connection, $items);
+                $batchId = (string) ($response['batchRequestId'] ?? '');
+                $sent += count($chunk);
+                if ($batchId !== '') {
+                    $batches[] = $batchId;
+                }
+            } catch (Throwable $e) {
+                $failed += count($chunk);
+                $errors[] = 'Fiyat/stok: '.$e->getMessage();
             }
         }
 

@@ -106,7 +106,7 @@ class DealerTrendyolController extends Controller
     public function send(Request $request, Dealer $dealer, TrendyolCategoryMatcher $matcher): RedirectResponse
     {
         $data = $request->validate([
-            'product_ids' => 'nullable|array|max:5000',
+            'product_ids' => 'nullable|array',
             'product_ids.*' => 'integer|exists:products,id',
             'send_all' => 'nullable|boolean',
             'category_id' => 'nullable|integer|min:1',
@@ -121,7 +121,9 @@ class DealerTrendyolController extends Controller
 
         $sendAll = $request->boolean('send_all');
         if ($sendAll) {
-            $productIds = Product::query()
+            // Limitsiz — job tüm stoklu aktif ürünleri alır
+            $productIds = null;
+            $countHint = Product::query()
                 ->where('is_active', true)
                 ->where(function ($q) {
                     $q->where(function ($plain) {
@@ -131,16 +133,16 @@ class DealerTrendyolController extends Controller
                             ->whereHas('variants', fn ($s) => $s->where('stock', '>', 0));
                     });
                 })
-                ->orderBy('id')
-                ->limit(5000)
-                ->pluck('id')
-                ->all();
+                ->count();
+            if ($countHint === 0) {
+                return $this->back($dealer)->with('error', 'Gönderilecek stoklu ürün yok.');
+            }
         } else {
             $productIds = array_map('intval', $data['product_ids'] ?? []);
-        }
-
-        if ($productIds === []) {
-            return $this->back($dealer)->with('error', 'Gönderilecek ürün seçilmedi. Tümünü gönder veya listeden seçin.');
+            if ($productIds === []) {
+                return $this->back($dealer)->with('error', 'Gönderilecek ürün seçilmedi. Tümünü gönder veya listeden seçin.');
+            }
+            $countHint = count($productIds);
         }
 
         $attributes = [];
@@ -177,7 +179,7 @@ class DealerTrendyolController extends Controller
         // Sayfa anında dönsün — gönderim kuyrukta
         Cache::put('trendyol_send_status_'.$dealer->id, [
             'status' => 'queued',
-            'message' => count($productIds).' ürün kuyruğa alındı…',
+            'message' => $countHint.' ürün kuyruğa alındı (limitsiz)…',
             'queued_at' => now()->toIso8601String(),
         ], now()->addHours(2));
 
