@@ -31,7 +31,7 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
 
     public int $maxExceptions = 1;
 
-    public int $uniqueFor = 600;
+    public int $uniqueFor = 120;
 
     public const BATCH_SIZE = 40;
 
@@ -141,7 +141,7 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
                     $this->attributes,
                     $i,
                     $totalBatches,
-                )->delay(now()->addSeconds(min($i * 1, 120)));
+                );  // delay yok — worker sırayla işler
             }
 
             Log::info('SendDealerTrendyolCatalog dispatched batches', [

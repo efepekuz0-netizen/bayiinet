@@ -21,6 +21,8 @@ php artisan bayiinet:ensure-admin || true
 
 # Takılı / başarısız kuyruk işlerini temizle (attempted too many times)
 php artisan queue:flush 2>/dev/null || true
+php artisan queue:prune-failed --hours=0 2>/dev/null || true
+php artisan queue:clear marketplace --force 2>/dev/null || true
 
 # Kuyruk işçileri: default (kar oranı, genel işler) + marketplace (Trendyol) + zamanlayıcı
 php artisan queue:work --queue=default,marketplace --sleep=2 --tries=1 --timeout=960 --memory=512 &

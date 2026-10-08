@@ -23,8 +23,17 @@
             </ul>
         @endif
         @if(in_array($sendStatus['status'] ?? '', ['running', 'queued'], true))
-            <div class="small text-muted mt-2">Sayfayı 15–30 sn sonra yenileyin; işlem arka planda sürer.</div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                <div class="small text-muted">Sayfa 20 sn’de yenilenir; işlem arka planda sürer.</div>
+                <form method="POST" action="{{ route('admin.dealers.trendyol.cancel', $dealer) }}" onsubmit="return confirm('Gönderim dursun ve kuyruk temizlensin mi?')">
+                    @csrf
+                    <button type="submit" class="btn btn-sm btn-danger">Gönderimi durdur</button>
+                </form>
+            </div>
             <script>setTimeout(function(){ location.reload(); }, 20000);</script>
+        @endif
+        @if(($sendStatus['status'] ?? '') === 'cancelled')
+            <div class="small text-muted mt-2">Durduruldu. İsterseniz yeniden «Tüm ürünleri gönder» deyin.</div>
         @endif
     </div>
 @endif

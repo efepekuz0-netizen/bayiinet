@@ -176,8 +176,12 @@ class DealerTrendyolController extends Controller
         if (is_array($existing) && in_array($existing['status'] ?? '', ['queued', 'running'], true)) {
             return $this->back($dealer)->with(
                 'error',
-                'Bu bayi için gönderim zaten devam ediyor: '.($existing['message'] ?? 'çalışıyor').' Bitmesini bekleyin veya 15 dk sonra tekrar deneyin.'
+                'Bu bayi için gönderim zaten devam ediyor: '.($existing['message'] ?? 'çalışıyor').' Önce «Gönderimi durdur» butonuna basın.'
             );
+        }
+        try {
+            Cache::lock('laravel_unique_job:trendyol-send-'.$dealer->id)->forceRelease();
+        } catch (\Throwable) {
         }
 
         // Sayfa anında dönsün — gönderim kuyrukta
@@ -204,6 +208,38 @@ class DealerTrendyolController extends Controller
         );
     }
 
+
+
+    public function cancelSend(Dealer $dealer): RedirectResponse
+    {
+        Cache::put('trendyol_send_status_'.$dealer->id, [
+            'status' => 'cancelled',
+            'message' => 'Gönderim durduruldu. Kuyruk temizleniyor…',
+            'finished_at' => now()->toIso8601String(),
+        ], now()->addHours(6));
+
+        // marketplace kuyruğundaki bekleyen işleri sil
+        try {
+            \Illuminate\Support\Facades\DB::table('jobs')->where('queue', 'marketplace')->delete();
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        // Unique lock serbest
+        try {
+            Cache::lock('laravel_unique_job:trendyol-send-'.$dealer->id)->forceRelease();
+        } catch (\Throwable) {
+        }
+        Cache::forget('laravel_unique_job:App\Jobs\SendDealerTrendyolCatalog:trendyol-send-'.$dealer->id);
+
+        Cache::put('trendyol_send_status_'.$dealer->id, [
+            'status' => 'cancelled',
+            'message' => 'Gönderim durduruldu. Yeni gönderim başlatabilirsiniz.',
+            'finished_at' => now()->toIso8601String(),
+        ], now()->addHours(6));
+
+        return $this->back($dealer)->with('success', 'Trendyol gönderimi durduruldu, kuyruk temizlendi.');
+    }
 
     public function deleteProducts(Request $request, Dealer $dealer): RedirectResponse
     {
