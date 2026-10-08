@@ -1,7 +1,11 @@
 @extends('layouts.app')
+@php
+    $statusLabels = ['pending'=>'Bekliyor','paid'=>'Ödendi','preparing'=>'Hazırlanıyor','shipped'=>'Kargoda','delivered'=>'Teslim','cancelled'=>'İptal','returned'=>'İade'];
+    $statusColors = ['pending'=>'secondary','paid'=>'info','preparing'=>'primary','shipped'=>'warning','delivered'=>'success','cancelled'=>'dark','returned'=>'danger'];
+@endphp
 @section('title', $order->order_number)
 @section('content')
-<h4 class="mb-4">{{ $order->order_number }} <span class="badge bg-secondary">{{ $order->status }}</span></h4>
+<h4 class="mb-4">{{ $order->order_number }} <span class="badge bg-secondary">{{ $statusLabels[$order->status] ?? $order->status }}</span></h4>
 
 <div class="row g-3">
     <div class="col-md-7">

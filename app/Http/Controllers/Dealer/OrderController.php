@@ -159,7 +159,7 @@ class OrderController extends Controller
                     $product->decrement('stock', $item['quantity']);
                 }
 
-                $unitPriceCents = (int) round(((float) $product->price + (float) ($variant?->price_diff ?? 0)) * 100);
+                $unitPriceCents = (int) round(((float) ($product->sell_price ?: $product->price) + (float) ($variant?->price_diff ?? 0)) * 100);
                 if ($unitPriceCents < 0) {
                     throw ValidationException::withMessages([
                         'items' => "{$product->title} için geçersiz fiyat hesaplandı.",
@@ -183,6 +183,18 @@ class OrderController extends Controller
             $totalCents = $subtotalCents;
             $subtotal = number_format($subtotalCents / 100, 2, '.', '');
             $total = number_format($totalCents / 100, 2, '.', '');
+
+            // Bakiye kontrolü — sipariş anında düşülür
+            $balanceCents = (int) round((float) $lockedDealer->balance * 100);
+            if ($balanceCents < $totalCents) {
+                throw ValidationException::withMessages([
+                    'balance' => 'Bakiyeniz yetersiz. Gerekli: '.number_format($totalCents / 100, 2, ',', '.').' ₺, mevcut: '.number_format($balanceCents / 100, 2, ',', '.').' ₺',
+                ]);
+            }
+
+            $newBalance = number_format(($balanceCents - $totalCents) / 100, 2, '.', '');
+            $lockedDealer->update(['balance' => $newBalance]);
+
             $order = Order::create([
                 'dealer_id' => $lockedDealer->id,
                 'customer_name' => $data['customer_name'],
@@ -194,9 +206,9 @@ class OrderController extends Controller
                 'subtotal' => $subtotal,
                 'shipping_cost' => 0,
                 'total' => $total,
-                'status' => 'pending',
+                'status' => 'paid',
                 'dealer_note' => $data['dealer_note'] ?? null,
-                'paid_at' => null,
+                'paid_at' => now(),
             ]);
 
             foreach ($orderItems as $oi) {
@@ -204,14 +216,24 @@ class OrderController extends Controller
                 OrderItem::create($oi);
             }
 
+            BalanceTransaction::create([
+                'dealer_id' => $lockedDealer->id,
+                'order_id' => $order->id,
+                'type' => 'order_payment',
+                'amount' => '-'.$total,
+                'balance_after' => $newBalance,
+                'description' => 'Sipariş ödemesi: '.$order->order_number,
+                'created_by' => auth()->id(),
+            ]);
 
             return $order;
         });
 
         Cache::forget('xml_feed_catalog');
+        Cache::forget('xml_feed_dealer_'.$dealer->id);
 
         return redirect()->route('dealer.orders.show', $order)
-            ->with('success', 'Sipariş oluşturuldu. Kargo takip numarası ve PDF bilgilerini gönderdiğinizde bakiye düşülecektir.');
+            ->with('success', 'Sipariş oluşturuldu. Tutar bakiyenizden düşüldü. Kargo takip bilgisini ekleyebilirsiniz.');
     }
 
     public function show(Order $order)
@@ -250,30 +272,19 @@ class OrderController extends Controller
         }
 
         DB::transaction(function () use ($order, $updates): void {
-            $lockedOrder = Order::query()->lockForUpdate()->with('dealer')->findOrFail($order->id);
-            if ($lockedOrder->status === 'pending') {
-                $dealer = Dealer::query()->lockForUpdate()->findOrFail($lockedOrder->dealer_id);
-                $totalCents = (int) round((float) $lockedOrder->total * 100);
-                $balanceCents = (int) round((float) $dealer->balance * 100);
-                if ($balanceCents < $totalCents) {
-                    throw ValidationException::withMessages(['balance' => 'Bakiyeniz yetersiz. Kargo bilgisi kaydedilmedi.']);
-                }
-                $newBalance = number_format(($balanceCents - $totalCents) / 100, 2, '.', '');
-                $dealer->update(['balance' => $newBalance]);
-                $lockedOrder->update(array_merge($updates, ['status' => 'preparing', 'paid_at' => now()]));
-                BalanceTransaction::create([
-                    'dealer_id' => $dealer->id,
-                    'order_id' => $lockedOrder->id,
-                    'type' => 'order_payment',
-                    'amount' => '-'.$lockedOrder->total,
-                    'balance_after' => $newBalance,
-                    'description' => 'Sipariş ödemesi: '.$lockedOrder->order_number,
-                ]);
-            } else {
-                $lockedOrder->update($updates);
+            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
+
+            // Bakiye sipariş anında düşülmüş olmalı; burada sadece kargo + durum
+            if (in_array($lockedOrder->status, ['paid', 'pending'], true)) {
+                $updates['status'] = 'preparing';
             }
+            if (empty($lockedOrder->shipped_at) && ($updates['status'] ?? null) === 'shipped') {
+                $updates['shipped_at'] = now();
+            }
+
+            $lockedOrder->update($updates);
         });
 
-        return back()->with('success', 'Kargo bilgileri iletildi. Siparişiniz işleme alınacak.');
+        return back()->with('success', 'Kargo bilgileri kaydedildi. Sipariş hazırlanıyor.');
     }
 }

@@ -39,6 +39,11 @@ class AuthController extends Controller
                     return redirect()->route('dealer.application');
                 }
 
+                $intended = $request->query('redirect') ?: $request->input('redirect');
+                if (is_string($intended) && str_starts_with($intended, url('/'))) {
+                    return redirect()->to($intended);
+                }
+
                 return redirect()->intended(route('dealer.dashboard'));
             }
 

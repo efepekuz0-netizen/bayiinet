@@ -1,12 +1,20 @@
 @extends('layouts.app')
 @section('title', 'Sipariş Ver')
 @section('content')
-<div class="d-flex justify-content-between align-items-center mb-4">
+@php $balance = (float) auth()->user()->dealer->balance; @endphp
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <div>
         <h4 class="mb-1">Yeni Sipariş</h4>
-        <div class="text-muted small">Ürün seçin, müşteri teslimat bilgilerini girin. Tutar sipariş oluşturulunca bayi bakiyenizden düşülür.</div>
+        <div class="text-muted small">Ürün seçin, müşteri bilgilerini girin. Tutar onayda bakiyenizden düşülür.</div>
+    </div>
+    <div class="card px-3 py-2 mb-0 {{ $balance <= 0 ? 'border-danger' : 'border-success' }}">
+        <div class="small text-muted">Bakiyeniz</div>
+        <div class="fs-5 fw-bold {{ $balance <= 0 ? 'text-danger' : 'text-success' }}">{{ number_format($balance, 2, ',', '.') }} ₺</div>
     </div>
 </div>
+@if($balance <= 0)
+    <div class="alert alert-warning">Bakiyeniz yetersiz. Sipariş verebilmek için yöneticiden bakiye yüklemesi isteyin.</div>
+@endif
 
 @if($errors->any())
     <div class="alert alert-danger">
@@ -73,10 +81,10 @@
                                         @foreach($products as $product)
                                             @if($product->has_variants)
                                                 @foreach($product->variants->where('stock', '>', 0) as $variant)
-                                                    <option @selected($selectedProduct?->id === $product->id && $selectedVariant?->id === $variant->id) value="{{ $product->id }}" data-variant-id="{{ $variant->id }}" data-price="{{ (float) $product->price + (float) $variant->price_diff }}" data-stock="{{ $variant->stock }}">{{ $product->title }} — {{ $variant->full_name }} · {{ number_format((float) $product->price + (float) $variant->price_diff, 2) }} ₺ · Stok: {{ $variant->stock }}</option>
+                                                    <option @selected($selectedProduct?->id === $product->id && $selectedVariant?->id === $variant->id) value="{{ $product->id }}" data-variant-id="{{ $variant->id }}" data-price="{{ (float) ($product->sell_price ?? $product->price) + (float) ($variant->price_diff ?? 0) }}" data-stock="{{ $variant->stock }}">{{ $product->title }} — {{ $variant->full_name }} · {{ number_format((float) ($product->sell_price ?? $product->price) + (float) ($variant->price_diff ?? 0), 2) }} ₺ · Stok: {{ $variant->stock }}</option>
                                                 @endforeach
                                             @elseif($product->stock > 0)
-                                                <option @selected($selectedProduct?->id === $product->id && ! $selectedVariant) value="{{ $product->id }}" data-price="{{ $product->price }}" data-stock="{{ $product->stock }}">{{ $product->title }} · {{ number_format($product->price, 2) }} ₺ · Stok: {{ $product->stock }}</option>
+                                                <option @selected($selectedProduct?->id === $product->id && ! $selectedVariant) value="{{ $product->id }}" data-price="{{ $product->sell_price ?? $product->price }}" data-stock="{{ $product->stock }}">{{ $product->title }} · {{ number_format($product->sell_price ?? $product->price, 2) }} ₺ · Stok: {{ $product->stock }}</option>
                                             @endif
                                         @endforeach
                                     </select>
@@ -94,10 +102,10 @@
                             @foreach($products as $product)
                                 @if($product->has_variants)
                                     @foreach($product->variants->where('stock', '>', 0) as $variant)
-                                        <option value="{{ $product->id }}" data-variant-id="{{ $variant->id }}" data-price="{{ (float) $product->price + (float) $variant->price_diff }}" data-stock="{{ $variant->stock }}">{{ $product->title }} — {{ $variant->full_name }} · {{ number_format((float) $product->price + (float) $variant->price_diff, 2) }} ₺ · Stok: {{ $variant->stock }}</option>
+                                        <option value="{{ $product->id }}" data-variant-id="{{ $variant->id }}" data-price="{{ (float) ($product->sell_price ?? $product->price) + (float) ($variant->price_diff ?? 0) }}" data-stock="{{ $variant->stock }}">{{ $product->title }} — {{ $variant->full_name }} · {{ number_format((float) ($product->sell_price ?? $product->price) + (float) ($variant->price_diff ?? 0), 2) }} ₺ · Stok: {{ $variant->stock }}</option>
                                     @endforeach
                                 @elseif($product->stock > 0)
-                                    <option value="{{ $product->id }}" data-price="{{ $product->price }}" data-stock="{{ $product->stock }}">{{ $product->title }} · {{ number_format($product->price, 2) }} ₺ · Stok: {{ $product->stock }}</option>
+                                    <option value="{{ $product->id }}" data-price="{{ $product->sell_price ?? $product->price }}" data-stock="{{ $product->stock }}">{{ $product->title }} · {{ number_format($product->sell_price ?? $product->price, 2) }} ₺ · Stok: {{ $product->stock }}</option>
                                 @endif
                             @endforeach
                         </template>

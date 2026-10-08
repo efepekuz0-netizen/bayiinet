@@ -66,10 +66,16 @@ class HomeController extends Controller
         $product->load('variants');
 
         $related = Product::query()
+            ->with('variants')
             ->where('is_active', true)
+            ->where('show_on_homepage', true)
             ->where('id', '!=', $product->id)
-            ->where('main_category', $product->main_category)
-            ->take(4)
+            ->when($product->main_category, fn ($q) => $q->where('main_category', $product->main_category))
+            ->where(function ($q) {
+                $q->where('stock', '>', 0)
+                    ->orWhereHas('variants', fn ($v) => $v->where('stock', '>', 0));
+            })
+            ->take(8)
             ->get();
 
         return view('product-detail', compact('product', 'related'));
