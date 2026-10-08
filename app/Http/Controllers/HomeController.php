@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Product;
-use App\Models\Category;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class HomeController extends Controller
 {
@@ -35,15 +35,17 @@ class HomeController extends Controller
 
         $products = $query->latest('last_synced_at')->paginate(24)->withQueryString();
 
-        $categories = Product::query()
-            ->where('is_active', true)
-            ->whereNotNull('main_category')
-            ->where('main_category', '!=', '')
-            ->distinct()
-            ->pluck('main_category')
-            ->filter()
-            ->sort()
-            ->values();
+        $categories = Cache::remember('home_main_categories', 600, function () {
+            return Product::query()
+                ->where('is_active', true)
+                ->whereNotNull('main_category')
+                ->where('main_category', '!=', '')
+                ->distinct()
+                ->orderBy('main_category')
+                ->pluck('main_category')
+                ->filter()
+                ->values();
+        });
 
         $featured = Product::query()
             ->where('is_active', true)

@@ -26,7 +26,7 @@
         <h4 class="mb-0">Siparişlerim</h4>
         <div class="text-muted small">Bakiye: <strong>{{ number_format(auth()->user()->dealer->balance, 2, ',', '.') }} ₺</strong></div>
     </div>
-    <a href="{{ route('dealer.orders.create') }}" class="btn btn-primary btn-sm">
+    <a href="{{ route('home') }}" class="btn btn-primary btn-sm">
         <i class="bi bi-plus"></i> Yeni Sipariş
     </a>
 </div>

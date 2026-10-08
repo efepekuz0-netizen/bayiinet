@@ -134,6 +134,8 @@ class XmlImportService
             ]);
 
             Cache::forget('xml_feed_catalog');
+        Cache::forget('home_main_categories');
+        Cache::forget('admin_dash_stats_v2');
         } catch (\Throwable $e) {
             Log::error('XML Import Error: '.$e->getMessage());
             $import->update([
@@ -338,16 +340,29 @@ class XmlImportService
         // Görseller
         $images = [];
         $imageCount = (int) $this->xmlText($item, ['image_count'], '0');
-        for ($i = 1; $i <= max($imageCount, 10); $i++) {
-            $image = $this->xmlText($item, ["image_{$i}", "image{$i}", "Image{$i}"]);
-            if ($image !== '') {
+        for ($i = 1; $i <= max($imageCount, 15); $i++) {
+            $image = $this->xmlText($item, [
+                "Image{$i}", "image_{$i}", "image{$i}", "IMAGE{$i}",
+                "Picture{$i}", "picture_{$i}", "img{$i}", "Img{$i}",
+            ]);
+            if ($image !== '' && (str_starts_with($image, 'http://') || str_starts_with($image, 'https://'))) {
                 $images[] = $image;
             }
         }
-        // Alternatif: <images><image>
+        // Tek alan
+        foreach (['Image', 'image', 'image_url', 'ImageUrl', 'img', 'picture', 'Picture'] as $tag) {
+            $one = $this->xmlText($item, [$tag]);
+            if ($one !== '' && (str_starts_with($one, 'http://') || str_starts_with($one, 'https://'))) {
+                $images[] = $one;
+            }
+        }
+        // <images><image>
         if (isset($item->images->image)) {
             foreach ($item->images->image as $img) {
-                $images[] = trim((string) $img);
+                $u = trim((string) $img);
+                if ($u !== '' && (str_starts_with($u, 'http://') || str_starts_with($u, 'https://'))) {
+                    $images[] = $u;
+                }
             }
         }
         $data['images'] = array_values(array_unique($images));

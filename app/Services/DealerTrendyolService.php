@@ -823,8 +823,8 @@ class DealerTrendyolService
         MarketplaceConnection $connection,
         string $batchId,
         array $barcodeToListing,
-        int $attempts = 6,
-        int $sleepMs = 2500,
+        int $attempts = 8,
+        int $sleepMs = 3000,
     ): array {
         $lastError = '';
         for ($i = 0; $i < $attempts; $i++) {

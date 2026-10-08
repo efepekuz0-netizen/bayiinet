@@ -318,6 +318,17 @@
         @endif
         @yield('content')
     </main>
+    <footer class="border-top bg-white mt-auto py-3">
+        <div class="container small text-muted d-flex flex-wrap gap-3 justify-content-between">
+            <span>&copy; {{ date('Y') }} Bayiinet</span>
+            <span class="d-flex flex-wrap gap-3">
+                <a href="{{ route('pages.gizlilik') }}" class="text-muted text-decoration-none">Gizlilik</a>
+                <a href="{{ route('pages.mesafeli') }}" class="text-muted text-decoration-none">Mesafeli Satış</a>
+                <a href="{{ route('pages.iade') }}" class="text-muted text-decoration-none">İade</a>
+                <a href="{{ route('pages.contact') }}" class="text-muted text-decoration-none">İletişim</a>
+            </span>
+        </div>
+    </footer>
 @endauth
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 @stack('scripts')

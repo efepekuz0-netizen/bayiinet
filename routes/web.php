@@ -17,6 +17,10 @@ use App\Http\Controllers\XmlFeedController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
+Route::view('/gizlilik', 'pages.gizlilik')->name('pages.gizlilik');
+Route::view('/mesafeli-satis', 'pages.mesafeli-satis')->name('pages.mesafeli');
+Route::view('/iade', 'pages.iade')->name('pages.iade');
+Route::view('/iletisim', 'pages.iletisim')->name('pages.contact');
 Route::get('/urun/{product}', [HomeController::class, 'product'])->name('product.show');
 
 Route::middleware('guest')->group(function () {

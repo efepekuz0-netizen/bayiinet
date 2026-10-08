@@ -13,7 +13,7 @@ class ProductController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Product::with('source')->latest();
+        $query = Product::query()->with('source:id,name')->select(['id','source_id','title','stock_code','barcode','brand','price','sell_price','stock','is_active','has_variants','updated_at'])->latest();
 
         if ($search = $request->get('q')) {
             $query->where(function ($q) use ($search) {

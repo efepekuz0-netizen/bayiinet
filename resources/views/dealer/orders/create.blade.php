@@ -9,7 +9,7 @@
 @endphp
 
 <div class="mb-3">
-    <a href="{{ $selectedProduct ? route('products.show', $selectedProduct) : route('home') }}" class="small text-decoration-none">&larr; Geri</a>
+    <a href="{{ $selectedProduct ? route('product.show', $selectedProduct) : route('home') }}" class="small text-decoration-none">&larr; Geri</a>
     <h4 class="mb-1 mt-1">Sipariş Ver</h4>
     <p class="text-muted small mb-0">Müşteri ve teslimat bilgilerini girin. Onayda tutar bakiyenizden düşülür.</p>
 </div>

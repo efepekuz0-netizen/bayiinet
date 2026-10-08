@@ -75,7 +75,7 @@
 </div>
 
 @php
-    $statusLabels = ['pending' => 'Hazırlandı', 'sent' => 'Gönderildi', 'created' => 'Trendyol\'da oluştu', 'failed' => 'Hatalı'];
+    $statusLabels = ['pending' => 'Hazırlandı', 'sent' => 'Doğrulama bekliyor', 'created' => 'Trendyol\'da oluştu', 'failed' => 'Hatalı'];
     $statusColors = ['pending' => 'secondary', 'sent' => 'info', 'created' => 'success', 'failed' => 'danger'];
 @endphp
 
