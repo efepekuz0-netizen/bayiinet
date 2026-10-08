@@ -99,22 +99,30 @@ Route::middleware(['auth', 'admin'])
         Route::delete('/ilanlar/{announcement}', [AdminOperationsController::class, 'destroyAnnouncement'])->name('announcements.destroy');
     });
 
-Route::middleware('auth')->get('/bayi/basvuru-durumu', function () {
+// Üye (bayi) paneli — bayilikxml tarzı kök yollar, /bayi öneki yok
+Route::middleware('auth')->get('/basvuru-durumu', function () {
     abort_unless(auth()->user()->isDealer() && auth()->user()->dealer, 404);
 
     return view('dealer.application', ['dealer' => auth()->user()->dealer]);
 })->name('dealer.application');
 
 Route::middleware(['auth', 'dealer'])
-    ->prefix('bayi')
     ->name('dealer.')
     ->group(function () {
-        Route::get('/', [DealerDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/panel', [DealerDashboardController::class, 'index'])->name('dashboard');
         Route::get('/hesabim', [DealerDashboardController::class, 'account'])->name('account');
-        Route::get('/urunler', [DealerProductController::class, 'index'])->name('products.index');
+        Route::get('/katalog', [DealerProductController::class, 'index'])->name('products.index');
         Route::get('/siparisler', [DealerOrderController::class, 'index'])->name('orders.index');
         Route::get('/siparisler/yeni', [DealerOrderController::class, 'create'])->name('orders.create');
         Route::post('/siparisler', [DealerOrderController::class, 'store'])->name('orders.store');
         Route::get('/siparisler/{order}', [DealerOrderController::class, 'show'])->name('orders.show');
         Route::post('/siparisler/{order}/kargo', [DealerOrderController::class, 'uploadCargo'])->name('orders.cargo');
     });
+
+// Eski /bayi/* adreslerini yeni köklere yönlendir
+Route::redirect('/bayi', '/panel', 301);
+Route::redirect('/bayi/hesabim', '/hesabim', 301);
+Route::redirect('/bayi/urunler', '/katalog', 301);
+Route::redirect('/bayi/siparisler', '/siparisler', 301);
+Route::redirect('/bayi/siparisler/yeni', '/siparisler/yeni', 301);
+Route::redirect('/bayi/basvuru-durumu', '/basvuru-durumu', 301);
