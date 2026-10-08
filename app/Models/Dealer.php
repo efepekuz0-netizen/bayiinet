@@ -13,6 +13,7 @@ class Dealer extends Model
         'company_name',
         'tax_number',
         'tax_office',
+        'tax_document_path',
         'phone',
         'address',
         'city',

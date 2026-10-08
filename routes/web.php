@@ -114,6 +114,9 @@ Route::middleware(['auth', 'dealer'])
     ->group(function () {
         Route::get('/panel', [DealerDashboardController::class, 'index'])->name('dashboard');
         Route::get('/hesabim', [DealerDashboardController::class, 'account'])->name('account');
+        Route::put('/hesabim/profil', [DealerDashboardController::class, 'updateProfile'])->name('account.profile');
+        Route::put('/hesabim/sifre', [DealerDashboardController::class, 'updatePassword'])->name('account.password');
+        Route::post('/hesabim/vergi-levhasi', [DealerDashboardController::class, 'uploadTaxDocument'])->name('account.tax');
         Route::get('/katalog', [DealerProductController::class, 'index'])->name('products.index');
         Route::get('/siparisler', [DealerOrderController::class, 'index'])->name('orders.index');
         Route::get('/siparisler/yeni', [DealerOrderController::class, 'create'])->name('orders.create');

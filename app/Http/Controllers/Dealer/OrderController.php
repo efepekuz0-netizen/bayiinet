@@ -27,29 +27,23 @@ class OrderController extends Controller
 
     public function create(Request $request)
     {
-        $products = Product::with('variants')
-            ->where('is_active', true)
-            ->where(function ($q) {
-                $q->where(function ($products) {
-                    $products->where('has_variants', false)->where('stock', '>', 0);
-                })->orWhere(function ($products) {
-                    $products->where('has_variants', true)
-                        ->whereHas('variants', fn ($variants) => $variants->where('stock', '>', 0));
-                });
-            })
-            ->orderBy('title')
-            ->get();
-
+        // 12k ürün yükleme yok — sadece seçilen ürün (hızlı)
         $selectedProduct = null;
         $selectedVariant = null;
+
         if ($request->filled('product')) {
-            $selectedProduct = $products->firstWhere('id', (int) $request->integer('product'));
+            $selectedProduct = Product::query()
+                ->with(['variants' => fn ($q) => $q->where('stock', '>', 0)])
+                ->where('is_active', true)
+                ->whereKey((int) $request->integer('product'))
+                ->first();
+
             if ($selectedProduct && $request->filled('variant')) {
                 $selectedVariant = $selectedProduct->variants->firstWhere('id', (int) $request->integer('variant'));
             }
         }
 
-        return view('dealer.orders.create', compact('products', 'selectedProduct', 'selectedVariant'));
+        return view('dealer.orders.create', compact('selectedProduct', 'selectedVariant'));
     }
 
     public function store(Request $request)

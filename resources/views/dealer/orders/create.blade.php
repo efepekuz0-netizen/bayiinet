@@ -1,201 +1,143 @@
 @extends('layouts.app')
 @section('title', 'Sipariş Ver')
 @section('content')
-@php $balance = (float) auth()->user()->dealer->balance; @endphp
-<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-    <div>
-        <h4 class="mb-1">Yeni Sipariş</h4>
-        <div class="text-muted small">Ürün seçin, müşteri bilgilerini girin. Tutar onayda bakiyenizden düşülür.</div>
-    </div>
-    <div class="card px-3 py-2 mb-0 {{ $balance <= 0 ? 'border-danger' : 'border-success' }}">
-        <div class="small text-muted">Bakiyeniz</div>
-        <div class="fs-5 fw-bold {{ $balance <= 0 ? 'text-danger' : 'text-success' }}">{{ number_format($balance, 2, ',', '.') }} ₺</div>
+@php
+    $balance = (float) auth()->user()->dealer->balance;
+    $unit = $selectedProduct
+        ? (float) (($selectedProduct->sell_price ?? $selectedProduct->price) + (float) ($selectedVariant->price_diff ?? 0))
+        : 0;
+@endphp
+
+<div class="mb-3">
+    <a href="{{ $selectedProduct ? route('products.show', $selectedProduct) : route('home') }}" class="small text-decoration-none">&larr; Geri</a>
+    <h4 class="mb-1 mt-1">Sipariş Ver</h4>
+    <p class="text-muted small mb-0">Müşteri ve teslimat bilgilerini girin. Onayda tutar bakiyenizden düşülür.</p>
+</div>
+
+<div class="card border-0 shadow-sm mb-3 {{ $balance <= 0 ? 'border-danger' : '' }}">
+    <div class="card-body d-flex justify-content-between align-items-center py-3">
+        <div>
+            <div class="text-muted small">Bakiyeniz</div>
+            <div class="fs-4 fw-bold {{ $balance <= 0 ? 'text-danger' : 'text-success' }}">{{ number_format($balance, 2, ',', '.') }} ₺</div>
+        </div>
+        @if($selectedProduct)
+            <div class="text-end">
+                <div class="text-muted small">Birim fiyat</div>
+                <div class="fw-semibold">{{ number_format($unit, 2, ',', '.') }} ₺</div>
+            </div>
+        @endif
     </div>
 </div>
+
 @if($balance <= 0)
-    <div class="alert alert-warning">Bakiyeniz yetersiz. Sipariş verebilmek için yöneticiden bakiye yüklemesi isteyin.</div>
+    <div class="alert alert-warning">Bakiyeniz yetersiz. Sipariş için yöneticiye bakiye yüklemesi talep edin.</div>
 @endif
-
 @if($errors->any())
-    <div class="alert alert-danger">
-        <ul class="mb-0">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul>
-    </div>
+    <div class="alert alert-danger"><ul class="mb-0">@foreach($errors->all() as $e)<li>{{ $e }}</li>@endforeach</ul></div>
 @endif
 
+@if(!$selectedProduct)
+    <div class="alert alert-info">
+        Sipariş vermek için önce <a href="{{ route('home') }}">katalogdan</a> bir ürün seçip «Sipariş Ver»e tıklayın.
+    </div>
+@else
 <form method="POST" action="{{ route('dealer.orders.store') }}" id="orderForm">
     @csrf
-    <div class="row g-3">
-        <div class="col-md-5">
-            <div class="card mb-3">
-                <div class="card-header bg-white fw-semibold">Teslimat Bilgileri</div>
-                <div class="card-body">
-                    <div class="mb-2">
-                        <label class="form-label">Ad Soyad *</label>
-                        <input type="text" name="customer_name" class="form-control" required value="{{ old('customer_name') }}">
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label">Telefon</label>
-                        <input type="text" name="customer_phone" class="form-control" value="{{ old('customer_phone') }}">
-                    </div>
-                    <div class="row">
-                        <div class="col-6 mb-2">
-                            <label class="form-label">Şehir *</label>
-                            <input type="text" name="customer_city" class="form-control" required value="{{ old('customer_city') }}">
-                        </div>
-                        <div class="col-6 mb-2">
-                            <label class="form-label">İlçe</label>
-                            <input type="text" name="customer_district" class="form-control" value="{{ old('customer_district') }}">
-                        </div>
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label">Adres *</label>
-                        <textarea name="customer_address" class="form-control" rows="3" required>{{ old('customer_address') }}</textarea>
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label">E-posta</label>
-                        <input type="email" name="customer_email" class="form-control" value="{{ old('customer_email') }}">
-                    </div>
-                    <div>
-                        <label class="form-label">Sipariş Notu</label>
-                        <textarea name="dealer_note" class="form-control" rows="2">{{ old('dealer_note') }}</textarea>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <input type="hidden" name="items[0][product_id]" value="{{ $selectedProduct->id }}">
+    @if($selectedVariant)
+        <input type="hidden" name="items[0][product_variant_id]" value="{{ $selectedVariant->id }}">
+    @endif
 
-        <div class="col-md-7">
-            <div class="card mb-3">
-                <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
-                    <span>Ürünler</span>
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="addRow" @disabled($products->isEmpty())>+ Ürün Ekle</button>
-                </div>
-                <div class="card-body">
-                    @if($products->isEmpty())
-                        <p class="text-muted mb-0">Şu anda sipariş edilebilir stokta ürün bulunmuyor.</p>
-                    @else
-                        <div id="items">
-                            <div class="row g-2 mb-3 item-row">
-                                <div class="col-8">
-                                    <select name="items[0][product_id]" class="form-select product-select" required>
-                                        <option value="">Ürün seçin...</option>
-                                        @foreach($products as $product)
-                                            @if($product->has_variants)
-                                                @foreach($product->variants->where('stock', '>', 0) as $variant)
-                                                    <option @selected($selectedProduct?->id === $product->id && $selectedVariant?->id === $variant->id) value="{{ $product->id }}" data-variant-id="{{ $variant->id }}" data-price="{{ (float) ($product->sell_price ?? $product->price) + (float) ($variant->price_diff ?? 0) }}" data-stock="{{ $variant->stock }}">{{ $product->title }} — {{ $variant->full_name }} · {{ number_format((float) ($product->sell_price ?? $product->price) + (float) ($variant->price_diff ?? 0), 2) }} ₺ · Stok: {{ $variant->stock }}</option>
-                                                @endforeach
-                                            @elseif($product->stock > 0)
-                                                <option @selected($selectedProduct?->id === $product->id && ! $selectedVariant) value="{{ $product->id }}" data-price="{{ $product->sell_price ?? $product->price }}" data-stock="{{ $product->stock }}">{{ $product->title }} · {{ number_format($product->sell_price ?? $product->price, 2) }} ₺ · Stok: {{ $product->stock }}</option>
-                                            @endif
-                                        @endforeach
-                                    </select>
-                                </div>
-                                <div class="col-3">
-                                    <input type="number" name="items[0][quantity]" class="form-control qty" min="1" value="1" required>
-                                </div>
-                                <div class="col-1">
-                                    <button type="button" class="btn btn-outline-danger btn-sm remove-row" aria-label="Ürünü kaldır">×</button>
-                                </div>
-                                <input type="hidden" name="items[0][product_variant_id]" class="variant-id">
-                            </div>
-                        </div>
-                        <template id="product-options">
-                            @foreach($products as $product)
-                                @if($product->has_variants)
-                                    @foreach($product->variants->where('stock', '>', 0) as $variant)
-                                        <option value="{{ $product->id }}" data-variant-id="{{ $variant->id }}" data-price="{{ (float) ($product->sell_price ?? $product->price) + (float) ($variant->price_diff ?? 0) }}" data-stock="{{ $variant->stock }}">{{ $product->title }} — {{ $variant->full_name }} · {{ number_format((float) ($product->sell_price ?? $product->price) + (float) ($variant->price_diff ?? 0), 2) }} ₺ · Stok: {{ $variant->stock }}</option>
-                                    @endforeach
-                                @elseif($product->stock > 0)
-                                    <option value="{{ $product->id }}" data-price="{{ $product->sell_price ?? $product->price }}" data-stock="{{ $product->stock }}">{{ $product->title }} · {{ number_format($product->sell_price ?? $product->price, 2) }} ₺ · Stok: {{ $product->stock }}</option>
-                                @endif
-                            @endforeach
-                        </template>
-                        <template id="item-row-template">
-                            <div class="row g-2 mb-3 item-row">
-                                <div class="col-8">
-                                    <select name="items[__INDEX__][product_id]" class="form-select product-select" required>
-                                        <option value="">Ürün seçin...</option>
-                                    </select>
-                                </div>
-                                <div class="col-3">
-                                    <input type="number" name="items[__INDEX__][quantity]" class="form-control qty" min="1" value="1" required>
-                                </div>
-                                <div class="col-1">
-                                    <button type="button" class="btn btn-outline-danger btn-sm remove-row" aria-label="Ürünü kaldır">×</button>
-                                </div>
-                                <input type="hidden" name="items[__INDEX__][product_variant_id]" class="variant-id">
-                            </div>
-                        </template>
-                        <div class="d-flex justify-content-between border-top pt-3">
-                            <span class="text-muted">Tahmini toplam</span>
-                            <strong id="order-total">0,00 ₺</strong>
-                        </div>
-                    @endif
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <div class="d-flex gap-3 align-items-start">
+                @php $img = is_array($selectedProduct->images ?? null) ? ($selectedProduct->images[0] ?? null) : null; @endphp
+                @if($img)
+                    <img src="{{ $img }}" alt="" class="rounded" style="width:72px;height:72px;object-fit:cover">
+                @endif
+                <div class="flex-grow-1 min-w-0">
+                    <div class="fw-semibold">{{ $selectedProduct->title }}</div>
+                    <div class="small text-muted">{{ $selectedProduct->stock_code }}
+                        @if($selectedVariant) · {{ $selectedVariant->full_name ?? $selectedVariant->sku }} @endif
+                    </div>
+                    <div class="small mt-1">Stok:
+                        {{ $selectedVariant ? $selectedVariant->stock : $selectedProduct->stock }}
+                    </div>
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary btn-lg w-100" @disabled($products->isEmpty())>Siparişi Oluştur ve Bakiyeden Düş</button>
+            <div class="row g-2 mt-3 align-items-end">
+                <div class="col-6 col-md-3">
+                    <label class="form-label">Adet *</label>
+                    <input type="number" name="items[0][quantity]" id="qty" class="form-control" min="1"
+                           max="{{ $selectedVariant ? $selectedVariant->stock : $selectedProduct->stock }}"
+                           value="{{ old('items.0.quantity', 1) }}" required>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label">Toplam</label>
+                    <div class="form-control-plaintext fw-bold fs-5" id="lineTotal">{{ number_format($unit, 2, ',', '.') }} ₺</div>
+                </div>
+            </div>
         </div>
     </div>
+
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold border-0 pt-3">Müşteri / Teslimat</div>
+        <div class="card-body pt-0">
+            <div class="mb-3">
+                <label class="form-label">Ad Soyad *</label>
+                <input type="text" name="customer_name" class="form-control form-control-lg" required
+                       value="{{ old('customer_name') }}" autocomplete="name" placeholder="Alıcı adı soyadı">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Telefon</label>
+                <input type="tel" name="customer_phone" class="form-control" value="{{ old('customer_phone') }}"
+                       placeholder="05xx xxx xx xx" autocomplete="tel">
+            </div>
+            <div class="row g-2">
+                <div class="col-6 mb-3">
+                    <label class="form-label">Şehir *</label>
+                    <input type="text" name="customer_city" class="form-control" required value="{{ old('customer_city') }}">
+                </div>
+                <div class="col-6 mb-3">
+                    <label class="form-label">İlçe</label>
+                    <input type="text" name="customer_district" class="form-control" value="{{ old('customer_district') }}">
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Adres *</label>
+                <textarea name="customer_address" class="form-control" rows="3" required
+                          placeholder="Mahalle, sokak, bina, daire">{{ old('customer_address') }}</textarea>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">E-posta</label>
+                <input type="email" name="customer_email" class="form-control" value="{{ old('customer_email') }}">
+            </div>
+            <div class="mb-0">
+                <label class="form-label">Sipariş notu</label>
+                <textarea name="dealer_note" class="form-control" rows="2" placeholder="Opsiyonel">{{ old('dealer_note') }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-grid gap-2 mb-4">
+        <button type="submit" class="btn btn-primary btn-lg" id="submitBtn" @disabled($balance <= 0)>
+            Siparişi Onayla
+        </button>
+        <div class="text-center text-muted small">Kargo takip no sipariş oluştuktan sonra eklenir.</div>
+    </div>
 </form>
-@endsection
-
-@if($products->isNotEmpty())
-    @push('scripts')
-    <script>
-    (() => {
-        let index = 1;
-        const items = document.getElementById('items');
-        const productOptions = document.getElementById('product-options').innerHTML;
-        const rowTemplate = document.getElementById('item-row-template');
-        const totalElement = document.getElementById('order-total');
-
-        const updateRow = (row) => {
-            const select = row.querySelector('.product-select');
-            const option = select.selectedOptions[0];
-            const quantity = row.querySelector('.qty');
-            row.querySelector('.variant-id').value = option?.dataset.variantId || '';
-            quantity.max = option?.dataset.stock || '';
-            updateTotal();
-        };
-
-        const updateTotal = () => {
-            const total = [...items.querySelectorAll('.item-row')].reduce((sum, row) => {
-                const option = row.querySelector('.product-select').selectedOptions[0];
-                const quantity = Number(row.querySelector('.qty').value || 0);
-                return sum + Number(option?.dataset.price || 0) * quantity;
-            }, 0);
-            totalElement.textContent = new Intl.NumberFormat('tr-TR', {
-                style: 'currency',
-                currency: 'TRY'
-            }).format(total);
-        };
-
-        document.getElementById('addRow').addEventListener('click', () => {
-            const row = rowTemplate.content.firstElementChild.cloneNode(true);
-            row.querySelectorAll('[name]').forEach((field) => {
-                field.name = field.name.replaceAll('__INDEX__', index);
-            });
-            row.querySelector('.product-select').insertAdjacentHTML('beforeend', productOptions);
-            items.appendChild(row);
-            index++;
-        });
-
-        items.addEventListener('change', (event) => {
-            if (event.target.matches('.product-select')) {
-                updateRow(event.target.closest('.item-row'));
-            }
-        });
-        items.addEventListener('input', (event) => {
-            if (event.target.matches('.qty')) {
-                updateTotal();
-            }
-        });
-        items.addEventListener('click', (event) => {
-            if (event.target.matches('.remove-row') && items.querySelectorAll('.item-row').length > 1) {
-                event.target.closest('.item-row').remove();
-                updateTotal();
-            }
-        });
-    })();
-    </script>
-    @endpush
+<script>
+(function(){
+    const unit = {{ json_encode($unit) }};
+    const qty = document.getElementById('qty');
+    const total = document.getElementById('lineTotal');
+    const form = document.getElementById('orderForm');
+    const btn = document.getElementById('submitBtn');
+    function fmt(n){ return n.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+' ₺'; }
+    function upd(){ total.textContent = fmt(unit * (parseInt(qty.value,10)||0)); }
+    qty.addEventListener('input', upd); upd();
+    form.addEventListener('submit', function(){ btn.disabled = true; btn.textContent = 'Gönderiliyor…'; });
+})();
+</script>
 @endif
+@endsection

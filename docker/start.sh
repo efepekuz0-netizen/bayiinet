@@ -14,7 +14,8 @@ php artisan route:clear
 php artisan view:clear
 
 # Tabloları oluştur / güncelle. Başarısız olursa sebebi loglara yazılır, site yine de açılır.
-php artisan migrate --force || echo "UYARI: migrate basarisiz. DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD degerlerini kontrol edin."
+php artisan migrate --force
+php artisan storage:link 2>/dev/null || true || echo "UYARI: migrate basarisiz. DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD degerlerini kontrol edin."
 
 # ADMIN_EMAIL ve ADMIN_PASSWORD tanımlıysa ilk yönetici hesabını oluştur
 php artisan bayiinet:ensure-admin || true

@@ -246,22 +246,13 @@
             @else
                 @if(auth()->user()->dealer?->isActive())
                     <a href="{{ route('home') }}" class="{{ request()->routeIs('home') ? 'active' : '' }}">
-                        <i class="bi bi-house"></i> Ana Sayfa
+                        <i class="bi bi-house"></i> Katalog
                     </a>
-                    <a href="{{ route('dealer.account') }}" class="{{ request()->routeIs('dealer.account') ? 'active' : '' }}">
-                        <i class="bi bi-person"></i> Hesabım
-                    </a>
-                    <a href="{{ route('dealer.dashboard') }}" class="{{ request()->routeIs('dealer.dashboard') ? 'active' : '' }}">
-                        <i class="bi bi-speedometer2"></i> Panel
-                    </a>
-                    <a href="{{ route('dealer.products.index') }}" class="{{ request()->routeIs('dealer.products.*') ? 'active' : '' }}">
-                        <i class="bi bi-box-seam"></i> Katalog
-                    </a>
-                    <a href="{{ route('dealer.orders.create') }}" class="{{ request()->routeIs('dealer.orders.create') ? 'active' : '' }}">
-                        <i class="bi bi-plus-circle"></i> Sipariş Ver
-                    </a>
-                    <a href="{{ route('dealer.orders.index') }}" class="{{ request()->routeIs('dealer.orders.index') || request()->routeIs('dealer.orders.show') ? 'active' : '' }}">
+                    <a href="{{ route('dealer.orders.index') }}" class="{{ request()->routeIs('dealer.orders.*') ? 'active' : '' }}">
                         <i class="bi bi-cart-check"></i> Siparişlerim
+                    </a>
+                    <a href="{{ route('dealer.account') }}" class="{{ request()->routeIs('dealer.account*') ? 'active' : '' }}">
+                        <i class="bi bi-person"></i> Hesabım
                     </a>
                 @else
                     <a href="{{ route('dealer.application') }}" class="active">
