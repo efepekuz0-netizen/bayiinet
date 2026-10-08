@@ -166,6 +166,14 @@ class DealerTrendyolController extends Controller
             return $this->back($dealer)->with('error', 'Önce Trendyol API bilgilerini kaydedin.');
         }
 
+        $existing = Cache::get('trendyol_send_status_'.$dealer->id);
+        if (is_array($existing) && in_array($existing['status'] ?? '', ['queued', 'running'], true)) {
+            return $this->back($dealer)->with(
+                'error',
+                'Bu bayi için gönderim zaten devam ediyor: '.($existing['message'] ?? 'çalışıyor').' Bitmesini bekleyin veya 15 dk sonra tekrar deneyin.'
+            );
+        }
+
         // Sayfa anında dönsün — gönderim kuyrukta
         Cache::put('trendyol_send_status_'.$dealer->id, [
             'status' => 'queued',

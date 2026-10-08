@@ -19,8 +19,11 @@ php artisan migrate --force || echo "UYARI: migrate basarisiz. DB_HOST, DB_DATAB
 # ADMIN_EMAIL ve ADMIN_PASSWORD tanımlıysa ilk yönetici hesabını oluştur
 php artisan bayiinet:ensure-admin || true
 
+# Takılı / başarısız kuyruk işlerini temizle (attempted too many times)
+php artisan queue:flush 2>/dev/null || true
+
 # Kuyruk işçileri: default (kar oranı, genel işler) + marketplace (Trendyol) + zamanlayıcı
-php artisan queue:work --queue=default,marketplace --sleep=2 --tries=1 --timeout=3600 &
+php artisan queue:work --queue=default,marketplace --sleep=2 --tries=1 --timeout=960 --memory=512 &
 php artisan schedule:work &
 
 # --no-reload: ortam değişkenlerinin (APP_KEY, DB_*) uygulamaya iletilmesi için şart
