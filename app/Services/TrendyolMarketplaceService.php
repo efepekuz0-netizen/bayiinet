@@ -199,6 +199,29 @@ class TrendyolMarketplaceService
         return null;
     }
 
+    /** Trendyol'da bilinmeyen markalar için "Diğer" veya masaüstü varsayılanı */
+    public function resolveGenericBrandId(MarketplaceConnection $connection): int
+    {
+        return (int) \Illuminate\Support\Facades\Cache::remember(
+            'trendyol_brand_generic_diger_v2',
+            now()->addDays(30),
+            function () use ($connection) {
+                foreach (['Diğer', 'Diger', 'Other'] as $name) {
+                    try {
+                        $id = $this->findBrandId($connection, $name);
+                        if ($id) {
+                            return $id;
+                        }
+                    } catch (\Throwable) {
+                    }
+                }
+
+                // Masaüstü product_onboard BRAND_ID
+                return 2613880;
+            }
+        );
+    }
+
     private function productPath(MarketplaceConnection $connection): string
     {
         return '/integration/product/sellers/'.rawurlencode($connection->account_id);
