@@ -22,6 +22,14 @@ class OrderController extends Controller
         if ($status = $request->get('status')) {
             $query->where('status', $status);
         }
+        if ($q = trim((string) $request->get('q', ''))) {
+            $query->where(function ($w) use ($q) {
+                $w->where('order_number', 'like', "%{$q}%")
+                    ->orWhere('customer_name', 'like', "%{$q}%")
+                    ->orWhere('customer_phone', 'like', "%{$q}%")
+                    ->orWhereHas('dealer', fn ($d) => $d->where('company_name', 'like', "%{$q}%"));
+            });
+        }
 
         $orders = $query->paginate(25)->withQueryString();
 

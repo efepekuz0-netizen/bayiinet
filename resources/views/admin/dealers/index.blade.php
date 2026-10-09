@@ -1,72 +1,102 @@
 @extends('layouts.app')
 @section('title', 'Bayiler')
 @section('content')
+@php
+    $statusMap = [
+        'pending' => ['Bekliyor', 'warning'],
+        'active' => ['Aktif', 'success'],
+        'suspended' => ['Askıda', 'dark'],
+        'rejected' => ['Red', 'danger'],
+    ];
+@endphp
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
         <h4 class="mb-0">Bayiler</h4>
-        <div class="text-muted small">Onay, bakiye, XML ve Trendyol yönetimi</div>
+        <div class="text-muted small">Onay · bakiye · XML · Trendyol</div>
     </div>
-    <form method="GET" class="d-flex gap-2 flex-wrap">
-        @if(request('status'))
-            <input type="hidden" name="status" value="{{ request('status') }}">
-        @endif
-        <input type="search" name="q" value="{{ request('q') }}" class="form-control form-control-sm" placeholder="Firma, e-posta, şehir…" style="min-width:200px">
-        <button class="btn btn-sm btn-primary">Ara</button>
-    </form>
-</div>
-
-<div class="btn-group btn-group-sm mb-3 flex-wrap">
-    <a href="{{ route('admin.dealers.index') }}" class="btn btn-outline-secondary {{ !request('status') ? 'active' : '' }}">Tümü</a>
-    <a href="{{ route('admin.dealers.index', ['status' => 'pending']) }}" class="btn btn-outline-warning {{ request('status')=='pending' ? 'active' : '' }}">Bekleyen</a>
-    <a href="{{ route('admin.dealers.index', ['status' => 'active']) }}" class="btn btn-outline-success {{ request('status')=='active' ? 'active' : '' }}">Aktif</a>
-    <a href="{{ route('admin.dealers.index', ['status' => 'suspended']) }}" class="btn btn-outline-danger {{ request('status')=='suspended' ? 'active' : '' }}">Askıda</a>
 </div>
 
 <div class="row g-3">
-@forelse($dealers as $dealer)
-    @php
-        $statusMap = ['pending' => ['Bekliyor', 'warning'], 'active' => ['Aktif', 'success'], 'suspended' => ['Askıda', 'danger'], 'rejected' => ['Red', 'dark']];
-        [$stLabel, $stColor] = $statusMap[$dealer->status] ?? [$dealer->status, 'secondary'];
-    @endphp
-    <div class="col-12 col-md-6 col-xl-4">
-        <div class="card h-100 shadow-sm border-0">
+    <div class="col-lg-9 order-2 order-lg-1">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white fw-semibold">Bayi Listesi</div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Firma</th>
+                            <th>Yetkili / E-posta</th>
+                            <th>Şehir</th>
+                            <th>Durum</th>
+                            <th class="text-end">Bakiye</th>
+                            <th>Kayıt</th>
+                            <th class="text-end">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @forelse($dealers as $dealer)
+                        @php [$stLabel, $stColor] = $statusMap[$dealer->status] ?? [$dealer->status, 'secondary']; @endphp
+                        <tr>
+                            <td class="fw-semibold">
+                                <a href="{{ route('admin.dealers.show', $dealer) }}" class="text-decoration-none">{{ $dealer->company_name }}</a>
+                            </td>
+                            <td>
+                                <div>{{ $dealer->user->name ?? '—' }}</div>
+                                <div class="small text-muted">{{ $dealer->user->email ?? '' }}</div>
+                            </td>
+                            <td>{{ $dealer->city ?: '—' }}</td>
+                            <td><span class="badge text-bg-{{ $stColor }}">{{ $stLabel }}</span></td>
+                            <td class="text-end">{{ number_format((float)$dealer->balance, 2, ',', '.') }} ₺</td>
+                            <td class="small text-muted">{{ $dealer->created_at?->format('d.m.Y') }}</td>
+                            <td class="text-end text-nowrap">
+                                <a href="{{ route('admin.dealers.show', $dealer) }}" class="btn btn-sm btn-outline-primary" title="Detay"><i class="bi bi-eye"></i></a>
+                                @if($dealer->status === 'pending')
+                                    <form method="POST" action="{{ route('admin.dealers.approve', $dealer) }}" class="d-inline">
+                                        @csrf
+                                        <button class="btn btn-sm btn-success" title="Onayla" onclick="return confirm('Bu bayiyi onaylamak istiyor musunuz?')">
+                                            <i class="bi bi-check-lg"></i> Onayla
+                                        </button>
+                                    </form>
+                                @endif
+                                @if($dealer->status === 'active')
+                                    <a href="{{ route('admin.dealers.trendyol', $dealer) }}" class="btn btn-sm btn-outline-secondary" title="Trendyol"><i class="bi bi-shop"></i></a>
+                                @endif
+                            </td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="7" class="text-center text-muted py-5">Kayıt bulunamadı.</td></tr>
+                    @endforelse
+                    </tbody>
+                </table>
+            </div>
+            @if($dealers->hasPages())
+                <div class="card-footer bg-white">{{ $dealers->links() }}</div>
+            @endif
+        </div>
+    </div>
+    <div class="col-lg-3 order-1 order-lg-2">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white fw-semibold"><i class="bi bi-funnel me-1"></i> Filtreler</div>
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
-                    <div class="min-w-0">
-                        <h6 class="mb-0 text-truncate">{{ $dealer->company_name }}</h6>
-                        <div class="small text-muted text-truncate">{{ $dealer->user->name ?? '—' }} · {{ $dealer->user->email ?? '' }}</div>
+                <form method="GET">
+                    <div class="mb-2">
+                        <label class="form-label small">Ara</label>
+                        <input type="search" name="q" value="{{ request('q') }}" class="form-control form-control-sm" placeholder="Firma, e-posta, şehir">
                     </div>
-                    <span class="badge text-bg-{{ $stColor }}">{{ $stLabel }}</span>
-                </div>
-                <div class="d-flex justify-content-between small mb-2">
-                    <span class="text-muted">{{ $dealer->city ?: 'Şehir yok' }}</span>
-                    <span class="fw-bold text-primary">{{ number_format((float) $dealer->balance, 2, ',', '.') }} ₺</span>
-                </div>
-                <div class="d-flex flex-wrap gap-1 mb-3">
-                    @if($dealer->hasTrendyolCredentials())
-                        <span class="badge text-bg-light border">Trendyol bağlı</span>
-                    @else
-                        <span class="badge text-bg-light border text-muted">Trendyol yok</span>
-                    @endif
-                    @if($dealer->auto_sync_enabled)
-                        <span class="badge text-bg-light border">Oto senkron</span>
-                    @endif
-                </div>
-                <div class="d-flex flex-wrap gap-1">
-                    <a href="{{ route('admin.dealers.show', $dealer) }}" class="btn btn-sm btn-primary">Yönet</a>
-                    <a href="{{ route('admin.dealers.trendyol', $dealer) }}" class="btn btn-sm btn-outline-secondary">Trendyol</a>
-                    @if($dealer->status === 'pending')
-                        <form method="POST" action="{{ route('admin.dealers.approve', $dealer) }}" class="d-inline">@csrf
-                            <button class="btn btn-sm btn-success">Onayla</button>
-                        </form>
-                    @endif
-                </div>
+                    <div class="mb-3">
+                        <label class="form-label small">Durum</label>
+                        <select name="status" class="form-select form-select-sm">
+                            <option value="">Tümü</option>
+                            <option value="pending" @selected(request('status')==='pending')>Bekliyor</option>
+                            <option value="active" @selected(request('status')==='active')>Aktif</option>
+                            <option value="suspended" @selected(request('status')==='suspended')>Askıda</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary btn-sm w-100 mb-2">Filtrele</button>
+                    <a href="{{ route('admin.dealers.index') }}" class="btn btn-outline-secondary btn-sm w-100">Temizle</a>
+                </form>
             </div>
         </div>
     </div>
-@empty
-    <div class="col-12"><div class="alert alert-info mb-0">Bayi bulunamadı.</div></div>
-@endforelse
 </div>
-<div class="mt-3">{{ $dealers->links() }}</div>
 @endsection
