@@ -85,7 +85,7 @@ class HomeController extends Controller
                 }
             }
 
-            return view('home', compact('products', 'categories', 'featured'));
+            return $this->renderHome($request, $products, $categories, $featured);
         } catch (Throwable $e) {
             Log::error('HomeController::index failed', [
                 'error' => $e->getMessage(),
@@ -109,8 +109,45 @@ class HomeController extends Controller
             $categories = collect();
             $featured = collect();
 
-            return view('home', compact('products', 'categories', 'featured'))
+            return $this->renderHome($request, $products, $categories, $featured)
                 ->with('error', 'Katalog geçici olarak yüklenemedi. Lütfen biraz sonra tekrar deneyin.');
+        }
+    }
+
+    /**
+     * Ürün kartı / şablon render edilirken oluşan hatalar yüzünden site 500
+     * vermesin: hata loglanır, ikinci denemede katalog boş gösterilir.
+     * Gerçek sebep Yönetim → Sistem Sağlığı ekranında görünür.
+     */
+    private function renderHome(Request $request, $products, $categories, $featured)
+    {
+        try {
+            return view('home', compact('products', 'categories', 'featured'));
+        } catch (Throwable $e) {
+            Log::error('HomeController: home view render failed', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => \Illuminate\Support\Str::limit($e->getTraceAsString(), 1500),
+            ]);
+
+            $empty = new \Illuminate\Pagination\LengthAwarePaginator(
+                [],
+                0,
+                24,
+                1,
+                [
+                    'path' => $request->url(),
+                    'query' => $request->query(),
+                ]
+            );
+
+            return view('home', [
+                'products' => $empty,
+                'categories' => collect(),
+                'featured' => collect(),
+                'error' => 'Ürün listesi şu anda gösterilemiyor. Ayrıntı için Yönetim → Sistem Sağlığı ekranına bakın.',
+            ]);
         }
     }
 

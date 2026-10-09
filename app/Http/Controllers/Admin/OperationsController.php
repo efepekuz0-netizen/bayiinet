@@ -14,6 +14,8 @@ use App\Models\Product;
 use App\Models\XmlImport;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -299,4 +301,184 @@ class OperationsController extends Controller
 
         return back()->with('success', 'Duyuru silindi.');
     }
+
+    /**
+     * Sistem sağlığı / teşhis ekranı.
+     *
+     * Yarım kalmış migration'lar, eksik kolonlar ve anasayfa sorgusundaki
+     * hataları (500) admin panelinde görünür kılar.
+     */
+    public function health()
+    {
+        $checks = [];
+
+        try {
+            DB::connection()->getPdo();
+            $checks[] = ['label' => 'Veritabanı bağlantısı', 'ok' => true, 'detail' => DB::connection()->getDatabaseName()];
+            $dbOk = true;
+        } catch (\Throwable $e) {
+            $checks[] = ['label' => 'Veritabanı bağlantısı', 'ok' => false, 'detail' => $e->getMessage()];
+            $dbOk = false;
+        }
+
+        $tables = [
+            'users', 'dealers', 'products', 'product_variants', 'sources',
+            'orders', 'order_items', 'jobs', 'failed_jobs', 'cache', 'platform_settings',
+        ];
+        $tableStatus = [];
+        foreach ($tables as $table) {
+            $exists = $dbOk ? Schema::hasTable($table) : false;
+            $tableStatus[$table] = $exists;
+            if (! $exists) {
+                $checks[] = ['label' => "Tablo: {$table}", 'ok' => false, 'detail' => 'Tablo bulunamadı (migration eksik olabilir)'];
+            }
+        }
+
+        $expectedColumns = [
+            'products' => ['is_active', 'is_featured', 'show_on_homepage', 'has_variants', 'last_synced_at', 'main_category', 'category_path', 'sell_price', 'stock', 'images', 'title', 'stock_code'],
+            'product_variants' => ['product_id', 'stock', 'variant_price', 'variant_stock', 'variant_images', 'barcode'],
+            'orders' => ['dealer_id', 'status', 'total_amount'],
+        ];
+        $missingColumns = [];
+        if ($dbOk) {
+            foreach ($expectedColumns as $table => $columns) {
+                if (! ($tableStatus[$table] ?? false)) {
+                    $missingColumns[$table] = ['(tablo yok)'];
+                    continue;
+                }
+                $missing = [];
+                foreach ($columns as $column) {
+                    if (! Schema::hasColumn($table, $column)) {
+                        $missing[] = $column;
+                    }
+                }
+                if ($missing !== []) {
+                    $missingColumns[$table] = $missing;
+                    $checks[] = [
+                        'label' => "Eksik kolon: {$table}",
+                        'ok' => false,
+                        'detail' => implode(', ', $missing).' — migration çalıştırılmalı',
+                    ];
+                }
+            }
+        }
+
+        // Anasayfa / ürün kartı duman testi: 500 hatalarının kaynağını gösterir.
+        $tests = [];
+
+        try {
+            $total = Product::query()->where('is_active', true)->count();
+            $tests[] = ['label' => 'Ürün sorgusu', 'ok' => true, 'detail' => "Aktif ürün: ".number_format($total)];
+        } catch (\Throwable $e) {
+            $tests[] = ['label' => 'Ürün sorgusu', 'ok' => false, 'detail' => $e->getMessage()];
+            $total = 0;
+        }
+
+        try {
+            $cats = Product::query()->where('is_active', true)
+                ->whereNotNull('main_category')->where('main_category', '!=', '')
+                ->distinct()->pluck('main_category')->values();
+            $tests[] = ['label' => 'Kategori sorgusu', 'ok' => true, 'detail' => $cats->count().' kategori'];
+        } catch (\Throwable $e) {
+            $tests[] = ['label' => 'Kategori sorgusu', 'ok' => false, 'detail' => $e->getMessage()];
+        }
+
+        try {
+            $featuredCount = Schema::hasColumn('products', 'is_featured')
+                ? Product::query()->where('is_active', true)->where('is_featured', true)->count()
+                : 0;
+            $tests[] = ['label' => 'Öne çıkan sorgusu', 'ok' => true, 'detail' => $featuredCount.' ürün'];
+        } catch (\Throwable $e) {
+            $tests[] = ['label' => 'Öne çıkan sorgusu', 'ok' => false, 'detail' => $e->getMessage()];
+        }
+
+        // Varyant stok toplama (anasayfa kartında çağrılıyor)
+        try {
+            $variantProduct = Product::query()->where('has_variants', true)->first();
+            if ($variantProduct === null) {
+                $tests[] = ['label' => 'Varyant stok toplama', 'ok' => true, 'detail' => 'Varyantlı ürün yok, test atlandı'];
+            } else {
+                $stock = $variantProduct->effective_stock;
+                $tests[] = ['label' => 'Varyant stok toplama', 'ok' => true, 'detail' => "Ürün #{$variantProduct->id} → stok {$stock}"];
+            }
+        } catch (\Throwable $e) {
+            $tests[] = ['label' => 'Varyant stok toplama', 'ok' => false, 'detail' => $e->getMessage()];
+        }
+
+        // Kart render testi: hangi ürün patlıyorsa gösterir
+        $cardErrors = [];
+        try {
+            $samples = Product::query()->where('is_active', true)->orderByDesc('id')->take(24)->get();
+            foreach ($samples as $sample) {
+                try {
+                    view('partials.product-card', ['product' => $sample])->render();
+                } catch (\Throwable $e) {
+                    $cardErrors[] = [
+                        'product_id' => $sample->id,
+                        'title' => $sample->title,
+                        'error' => $e->getMessage(),
+                        'file' => $e->getFile(),
+                        'line' => $e->getLine(),
+                    ];
+                }
+            }
+            $tests[] = [
+                'label' => 'Ürün kartı render testi',
+                'ok' => $cardErrors === [],
+                'detail' => $cardErrors === []
+                    ? $samples->count().' ürün sorunsuz render edildi'
+                    : count($cardErrors).' üründe hata (aşağıda listeli)',
+            ];
+        } catch (\Throwable $e) {
+            $tests[] = ['label' => 'Ürün kartı render testi', 'ok' => false, 'detail' => $e->getMessage()];
+        }
+
+        // Kuyruk ve zamanlayıcı
+        $queue = ['pending' => 0, 'failed' => 0];
+        try {
+            if ($tableStatus['jobs'] ?? false) {
+                $queue['pending'] = DB::table('jobs')->count();
+            }
+            if ($tableStatus['failed_jobs'] ?? false) {
+                $queue['failed'] = DB::table('failed_jobs')->count();
+            }
+        } catch (\Throwable $e) {
+            // kuyruk tablosu okunamazsa sessizce geç
+        }
+
+        $failedJobs = collect();
+        if (($tableStatus['failed_jobs'] ?? false) && $queue['failed'] > 0) {
+            try {
+                $failedJobs = DB::table('failed_jobs')->orderByDesc('id')->limit(5)->get();
+            } catch (\Throwable $e) {
+                $failedJobs = collect();
+            }
+        }
+
+        $automation = [
+            'xml' => (bool) config('bayiinet.automation.xml_sync', false),
+            'trendyol' => (bool) config('bayiinet.automation.trendyol_sync', false),
+        ];
+        try {
+            $heartbeat = [
+                'scheduler_alive' => \App\Services\AutomationStatus::schedulerAlive(),
+                'jobs' => \App\Services\AutomationStatus::all(),
+            ];
+        } catch (\Throwable $e) {
+            $heartbeat = ['scheduler_alive' => false, 'jobs' => [], 'error' => $e->getMessage()];
+        }
+
+        return view('admin.operations.health', [
+            'checks' => $checks,
+            'tableStatus' => $tableStatus,
+            'missingColumns' => $missingColumns,
+            'tests' => $tests,
+            'cardErrors' => $cardErrors,
+            'queue' => $queue,
+            'failedJobs' => $failedJobs,
+            'automation' => $automation,
+            'heartbeat' => $heartbeat,
+        ]);
+    }
+
 }

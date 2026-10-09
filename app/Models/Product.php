@@ -83,15 +83,25 @@ class Product extends Model
      */
     public function getEffectiveStockAttribute(): int
     {
-        if ($this->has_variants) {
+        $fallback = (int) ($this->attributes['stock'] ?? 0);
+
+        if (! ($this->attributes['has_variants'] ?? false)) {
+            return $fallback;
+        }
+
+        // Varyant tablosu/kolonu eksikse (eksik migration) sayfalar 500'e
+        // düşmesin: ürünün kendi stok değerine dönüyoruz.
+        try {
             if ($this->relationLoaded('variants')) {
                 return (int) $this->variants->sum('stock');
             }
 
             return (int) ($this->variants()->sum('stock') ?? 0);
-        }
+        } catch (\Throwable $e) {
+            report($e);
 
-        return (int) $this->stock;
+            return $fallback;
+        }
     }
 
     /**

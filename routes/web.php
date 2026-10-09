@@ -87,6 +87,7 @@ Route::middleware(['auth', 'admin'])
 
         Route::get('/musteriler', [AdminOperationsController::class, 'customers'])->name('customers.index');
         Route::get('/kritik-stok', [AdminOperationsController::class, 'criticalStock'])->name('products.critical');
+        Route::get('/sistem-sagligi', [AdminOperationsController::class, 'health'])->name('operations.health');
         Route::get('/kara-liste', [AdminOperationsController::class, 'blacklist'])->name('blacklist.index');
         Route::post('/kara-liste', [AdminOperationsController::class, 'storeBlacklist'])->name('blacklist.store');
         Route::delete('/kara-liste/{entry}', [AdminOperationsController::class, 'destroyBlacklist'])->name('blacklist.destroy');

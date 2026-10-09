@@ -246,6 +246,9 @@
                 <a href="{{ route('admin.logs.index') }}" class="{{ request()->routeIs('admin.logs.*') ? 'active' : '' }}">
                     <i class="bi bi-list-ul"></i> Kayıtlar
                 </a>
+                <a href="{{ route('admin.operations.health') }}" class="{{ request()->routeIs('admin.operations.*') ? 'active' : '' }}">
+                    <i class="bi bi-heart-pulse"></i> Sistem Sağlığı
+                </a>
                 <a href="{{ route('admin.settings.index') }}" class="{{ request()->routeIs('admin.settings.*') ? 'active' : '' }}">
                     <i class="bi bi-sliders"></i> Ayarlar
                 </a>
