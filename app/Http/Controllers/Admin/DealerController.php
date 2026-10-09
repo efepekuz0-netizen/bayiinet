@@ -44,30 +44,52 @@ class DealerController extends Controller
 
     public function approve(Dealer $dealer)
     {
-        $payload = [
-            'status' => 'active',
-            'approved_at' => now(),
-            'suspended_at' => null,
-        ];
-        if (empty($dealer->integration_api_key)) {
-            $payload['integration_api_key'] = \Illuminate\Support\Str::random(48);
-        }
-        if (empty($dealer->xml_token)) {
-            $payload['xml_token'] = \Illuminate\Support\Str::random(40);
-        }
-        $dealer->update($payload);
+        try {
+            $payload = [
+                'status' => 'active',
+                'approved_at' => now(),
+            ];
 
-        return back()->with('success', 'Bayi onaylandı.');
+            // Kolon varsa temizle (eski DB'lerde olmayabilir)
+            if (\Illuminate\Support\Facades\Schema::hasColumn('dealers', 'suspended_at')) {
+                $payload['suspended_at'] = null;
+            }
+            if (empty($dealer->integration_api_key)
+                && \Illuminate\Support\Facades\Schema::hasColumn('dealers', 'integration_api_key')) {
+                $payload['integration_api_key'] = Str::random(48);
+            }
+            if (empty($dealer->xml_token)) {
+                $payload['xml_token'] = Str::random(40);
+            }
+
+            $dealer->update($payload);
+
+            Cache::forget('xml_feed_dealer_'.$dealer->id);
+            Cache::forget('xml_feed_'.$dealer->id);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return back()->with('error', 'Onay başarısız: '.$e->getMessage());
+        }
+
+        return back()->with('success', 'Bayi onaylandı. Artık giriş yapıp sipariş verebilir.');
     }
 
     public function suspend(Dealer $dealer)
     {
-        $dealer->update([
-            'status' => 'suspended',
-            'suspended_at' => now(),
-        ]);
+        try {
+            $payload = ['status' => 'suspended'];
+            if (\Illuminate\Support\Facades\Schema::hasColumn('dealers', 'suspended_at')) {
+                $payload['suspended_at'] = now();
+            }
+            $dealer->update($payload);
+            Cache::forget('xml_feed_dealer_'.$dealer->id);
+            Cache::forget('xml_feed_'.$dealer->id);
+        } catch (\Throwable $e) {
+            report($e);
 
-        Cache::forget('xml_feed_dealer_'.$dealer->id);
+            return back()->with('error', 'Askıya alma başarısız: '.$e->getMessage());
+        }
 
         return back()->with('success', 'Bayi askıya alındı.');
     }

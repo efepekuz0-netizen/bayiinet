@@ -82,7 +82,7 @@ class AuthController extends Controller
                 'company_name' => $data['company_name'],
                 'phone' => $data['phone'] ?? null,
                 'city' => $data['city'] ?? null,
-                'xml_token' => Str::random(48),
+                'xml_token' => str_replace('-', '', (string) Str::uuid()).Str::random(16),
                 'status' => 'pending',
                 'balance' => 0,
             ]);
