@@ -45,6 +45,17 @@ class Order extends Model
         'cargo_label_uploaded_at' => 'datetime',
     ];
 
+    /** @var array<string, array{0: string, 1: string}> [etiket, bootstrap tonu] */
+    public const STATUS_LABELS = [
+        'pending' => ['Bekliyor', 'secondary'],
+        'paid' => ['Ödendi', 'info'],
+        'preparing' => ['Hazırlanıyor', 'primary'],
+        'shipped' => ['Kargoda', 'warning'],
+        'delivered' => ['Teslim edildi', 'success'],
+        'cancelled' => ['İptal edildi', 'dark'],
+        'returned' => ['İade', 'danger'],
+    ];
+
     protected static function booted(): void
     {
         static::creating(function (Order $order): void {
@@ -52,6 +63,18 @@ class Order extends Model
                 $order->order_number = 'BYI-'.Str::upper((string) Str::ulid());
             }
         });
+    }
+
+    /** Sipariş durumunun Türkçe etiketi */
+    public function getStatusLabelAttribute(): string
+    {
+        return self::STATUS_LABELS[$this->status][0] ?? (string) $this->status;
+    }
+
+    /** Sipariş durumunun Bootstrap rozet tonu */
+    public function getStatusToneAttribute(): string
+    {
+        return self::STATUS_LABELS[$this->status][1] ?? 'secondary';
     }
 
     public function dealer(): BelongsTo

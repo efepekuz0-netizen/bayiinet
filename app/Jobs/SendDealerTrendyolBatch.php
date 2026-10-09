@@ -50,6 +50,9 @@ class SendDealerTrendyolBatch implements ShouldQueue
         // "Gönderimi durdur"a basıldıysa kuyruktaki işler kendini atlar.
         // (Eskiden tüm kuyruk siliniyordu; diğer bayilerin işleri de gidiyordu.)
         if (TrendyolSendProgress::isCancelled($this->dealerId)) {
+            // Parça "işlendi" sayılır, böylece gönderim durumu takılı kalmaz.
+            TrendyolSendProgress::addBatch($this->dealerId, 0, 0, 0, [], ['Gönderim durdurulduğu için atlandı.']);
+
             return;
         }
 

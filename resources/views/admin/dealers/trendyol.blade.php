@@ -1,40 +1,97 @@
 @extends('layouts.app')
 @section('title', $dealer->company_name.' · Trendyol')
 @section('content')
-@if(!empty($sendStatus))
-    <div class="alert alert-{{ ($sendStatus['status'] ?? '') === 'error' ? 'danger' : (($sendStatus['status'] ?? '') === 'done' ? (($sendStatus['failed'] ?? 0) > 0 && ($sendStatus['sent'] ?? 0) == 0 ? 'warning' : 'success') : 'info') }} mb-3">
-        <div class="d-flex justify-content-between align-items-start gap-2">
-            <div>
-                <strong>Trendyol gönderim:</strong>
-                {{ $sendStatus['message'] ?? $sendStatus['status'] ?? '' }}
-                @if(!empty($sendStatus['total'])) · toplam {{ $sendStatus['total'] }} @endif
-                @if(!empty($sendStatus['batches_done'])) · parça {{ $sendStatus['batches_done'] }}/{{ $sendStatus['total_batches'] ?? '?' }} @endif
-                @if(!empty($sendStatus['seconds'])) · {{ $sendStatus['seconds'] }} sn @endif
-            </div>
-            <span class="badge text-bg-{{ ($sendStatus['status'] ?? '') === 'running' || ($sendStatus['status'] ?? '') === 'queued' ? 'primary' : 'secondary' }}">
-                {{ $sendStatus['status'] ?? '' }}
-            </span>
+@if(!empty($sendStatus) && ($sendStatus['status'] ?? 'idle') !== 'idle')
+    @php
+        $st = $sendStatus['status'] ?? 'idle';
+        $total = (int) ($sendStatus['total'] ?? 0);
+        $processed = (int) ($sendStatus['processed'] ?? 0);
+        $sent = (int) ($sendStatus['sent'] ?? 0);
+        $pending = (int) ($sendStatus['pending'] ?? 0);
+        $failed = (int) ($sendStatus['failed'] ?? 0);
+        $batchesDone = (int) ($sendStatus['batches_done'] ?? 0);
+        $totalBatches = (int) ($sendStatus['total_batches'] ?? 0);
+        $percent = $total > 0 ? min(100, (int) round($processed * 100 / $total)) : 0;
+        $tone = match ($st) {
+            'error' => 'danger',
+            'cancelled' => 'secondary',
+            'done' => ($failed > 0 ? 'warning' : 'success'),
+            default => 'info',
+        };
+    @endphp
+    <div class="card border-{{ $tone }} mb-3" id="sendStatusCard">
+        <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span class="fw-semibold"><i class="bi bi-send me-1"></i> Trendyol gönderim durumu</span>
+            <span class="badge text-bg-{{ $tone }}">{{ $st }}</span>
         </div>
-        @if(!empty($sendStatus['errors']) && is_array($sendStatus['errors']))
-            <ul class="mb-0 mt-2 small">
-                @foreach(array_slice($sendStatus['errors'], 0, 8) as $err)
-                    <li>{{ $err }}</li>
-                @endforeach
-            </ul>
-        @endif
-        @if(in_array($sendStatus['status'] ?? '', ['running', 'queued'], true))
-            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
-                <div class="small text-muted">Sayfa 20 sn’de yenilenir; işlem arka planda sürer.</div>
-                <form method="POST" action="{{ route('admin.dealers.trendyol.cancel', $dealer) }}" onsubmit="return confirm('Gönderim dursun ve kuyruk temizlensin mi?')">
-                    @csrf
-                    <button type="submit" class="btn btn-sm btn-danger">Gönderimi durdur</button>
-                </form>
+        <div class="card-body">
+            <div class="d-flex justify-content-between small text-muted mb-1">
+                <span>{{ $processed }} / {{ $total }} ürün işlendi</span>
+                <span>{{ $batchesDone }} / {{ $totalBatches }} parça</span>
             </div>
-            <script>setTimeout(function(){ location.reload(); }, 20000);</script>
-        @endif
-        @if(($sendStatus['status'] ?? '') === 'cancelled')
-            <div class="small text-muted mt-2">Durduruldu. İsterseniz yeniden «Tüm ürünleri gönder» deyin.</div>
-        @endif
+            <div class="progress mb-3" style="height:8px" role="progressbar" aria-valuenow="{{ $percent }}" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar {{ in_array($st, ['running', 'queued'], true) ? 'progress-bar-striped progress-bar-animated' : '' }} bg-{{ $tone }}"
+                     style="width: {{ $percent }}%"></div>
+            </div>
+            <div class="d-flex flex-wrap gap-3 mb-2">
+                <span class="badge text-bg-success">Gönderilen: {{ $sent }}</span>
+                <span class="badge text-bg-info">Doğrulama bekleyen: {{ $pending }}</span>
+                <span class="badge text-bg-danger">Hatalı: {{ $failed }}</span>
+            </div>
+            <div class="small">{{ $sendStatus['message'] ?? '' }}</div>
+
+            @if(!empty($sendStatus['errors']) && is_array($sendStatus['errors']))
+                <div class="mt-2">
+                    <button class="btn btn-link btn-sm p-0" type="button" data-bs-toggle="collapse" data-bs-target="#sendErrors">
+                        Son hatalar ({{ count($sendStatus['errors']) }})
+                    </button>
+                    <div class="collapse mt-1" id="sendErrors">
+                        <ul class="small mb-0 ps-3">
+                            @foreach(array_slice($sendStatus['errors'], 0, 10) as $err)
+                                <li>{{ $err }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                </div>
+            @endif
+
+            @if(in_array($st, ['running', 'queued'], true))
+                <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+                    <span class="small text-muted"><i class="bi bi-arrow-repeat me-1"></i>Sayfa 15 saniyede bir yenilenir; işlem arka planda sürer.</span>
+                    <form method="POST" action="{{ route('admin.dealers.trendyol.cancel', $dealer) }}" class="ms-auto"
+                          onsubmit="return confirm('Gönderim dursun mu? Kuyrukta bekleyen parçalar atlanır, gönderilenler Trendyol\'da kalır.')">
+                        @csrf
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Gönderimi durdur</button>
+                    </form>
+                </div>
+                <script>
+                    (function () {
+                        const KEY = 'trendyolScrollY';
+                        const saved = sessionStorage.getItem(KEY);
+                        if (saved) {
+                            window.scrollTo(0, parseInt(saved, 10));
+                            sessionStorage.removeItem(KEY);
+                        }
+                        window.addEventListener('beforeunload', function () {
+                            sessionStorage.setItem(KEY, String(window.scrollY || 0));
+                        });
+                        setTimeout(function () { location.reload(); }, 15000);
+                    })();
+                </script>
+            @else
+                <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+                    <form method="POST" action="{{ route('admin.dealers.trendyol.recheck', $dealer) }}">
+                        @csrf
+                        <button class="btn btn-sm btn-outline-primary">Trendyol sonucunu şimdi çek</button>
+                    </form>
+                    <span class="small text-muted">«Doğrulama bekleyen» sayısı 15 dakikada bir otomatik olarak da güncellenir.</span>
+                </div>
+            @endif
+
+            @if($st === 'cancelled')
+                <div class="small text-muted mt-2">Durduruldu. İsterseniz yeniden «Tüm ürünleri gönder» deyin.</div>
+            @endif
+        </div>
     </div>
 @endif
 
@@ -235,7 +292,7 @@
                     <button type="submit" class="btn btn-success"
                             @disabled(! $dealer->hasTrendyolCredentials())
                             name="send_all" value="1"
-                            onclick="return confirm('Aktif ve stoklu TÜM ürünler (en fazla 5000) bu kategori/marka ile Trendyol\'a gönderilecek. Devam?')">
+                            onclick="return confirm('Aktif ve stoklu TÜM ürünler bu kategori/marka ile Trendyol\'a gönderilecek. Gönderim arka planda sürer. Devam?')">
                         Tüm ürünleri gönder
                     </button>
                 </div>

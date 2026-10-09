@@ -34,7 +34,7 @@
                 <tr>
                     <td>#{{ $import->id }}<div class="small text-muted">{{ $import->user->name ?? 'Sistem' }}</div></td>
                     <td>{{ $import->source->name ?? 'Silinmiş kaynak' }}<div class="small text-muted">{{ $import->file_name }}</div></td>
-                    <td><span class="badge text-bg-{{ $import->status === 'completed' ? 'success' : ($import->status === 'failed' ? 'danger' : 'warning') }}">{{ $import->status }}</span></td>
+                    <td><span class="badge text-bg-{{ $import->status_tone }}">{{ $import->status_label }}</span></td>
                     <td>{{ $import->total_products }}</td>
                     <td>{{ $import->created_count }} / {{ $import->updated_count }}</td>
                     <td>{{ $import->error_count }}</td>

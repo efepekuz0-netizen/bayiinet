@@ -1,26 +1,7 @@
 @extends('layouts.app')
 @section('title', 'Siparişlerim')
 @section('content')
-@php
-    $statusLabels = [
-        'pending' => 'Bekliyor',
-        'paid' => 'Ödendi',
-        'preparing' => 'Hazırlanıyor',
-        'shipped' => 'Kargoda',
-        'delivered' => 'Teslim',
-        'cancelled' => 'İptal',
-        'returned' => 'İade',
-    ];
-    $statusColors = [
-        'pending' => 'secondary',
-        'paid' => 'info',
-        'preparing' => 'primary',
-        'shipped' => 'warning',
-        'delivered' => 'success',
-        'cancelled' => 'dark',
-        'returned' => 'danger',
-    ];
-@endphp
+@php($statusLabels = \App\Models\Order::STATUS_LABELS)
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
         <h4 class="mb-0">Siparişlerim</h4>
@@ -50,7 +31,7 @@
                     <td><code>{{ $o->order_number }}</code></td>
                     <td>{{ $o->customer_name }}</td>
                     <td class="fw-semibold">{{ number_format($o->total, 2, ',', '.') }} ₺</td>
-                    <td><span class="badge text-bg-{{ $statusColors[$o->status] ?? 'secondary' }}">{{ $statusLabels[$o->status] ?? $o->status }}</span></td>
+                    <td><span class="badge text-bg-{{ $o->status_tone }}">{{ $o->status_label }}</span></td>
                     <td class="small">{{ $o->tracking_number ?? '—' }}</td>
                     <td class="small text-muted">{{ $o->created_at->format('d.m.Y H:i') }}</td>
                     <td><a href="{{ route('dealer.orders.show', $o) }}" class="btn btn-sm btn-outline-primary">Detay</a></td>

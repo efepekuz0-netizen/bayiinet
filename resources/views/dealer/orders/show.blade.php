@@ -1,17 +1,14 @@
 @extends('layouts.app')
-@php
-    $statusLabels = ['pending'=>'Bekliyor','paid'=>'Ödendi','preparing'=>'Hazırlanıyor','shipped'=>'Kargoda','delivered'=>'Teslim','cancelled'=>'İptal','returned'=>'İade'];
-    $statusColors = ['pending'=>'secondary','paid'=>'info','preparing'=>'primary','shipped'=>'warning','delivered'=>'success','cancelled'=>'dark','returned'=>'danger'];
-@endphp
 @section('title', $order->order_number)
 @section('content')
-<h4 class="mb-4">{{ $order->order_number }} <span class="badge bg-secondary">{{ $statusLabels[$order->status] ?? $order->status }}</span></h4>
+<h4 class="mb-4">{{ $order->order_number }} <span class="badge text-bg-{{ $order->status_tone }}">{{ $order->status_label }}</span></h4>
 
 <div class="row g-3">
     <div class="col-md-7">
         <div class="card mb-3">
             <div class="card-header bg-white fw-semibold">Ürünler</div>
-            <table class="table mb-0">
+            <div class="table-responsive">
+            <table class="table mb-0 align-middle">
                 <thead><tr><th>Ürün</th><th>Adet</th><th>Birim</th><th>Toplam</th></tr></thead>
                 <tbody>
                 @foreach($order->items as $item)
@@ -28,6 +25,7 @@
                     <td class="fw-bold">{{ number_format((float) $order->total, 2) }} ₺</td></tr>
                 </tfoot>
             </table>
+            </div>
         </div>
 
         <div class="card">

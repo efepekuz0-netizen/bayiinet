@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#2563eb">
     <title>Bayiinet — XML Bayilik & Stoksuz E-Ticaret</title>
+    <meta name="description" content="Binlerce ürünü XML ile mağazanıza aktarın, stok tutmadan satın. Bayiinet XML bayilik platformu.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='sans-serif' font-weight='700' font-size='17' fill='white'%3EB%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
@@ -27,42 +30,33 @@
             transition: .15s;
         }
         .cat-chip:hover, .cat-chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
-        .product-card {
-            border: 1px solid #e8edf5; border-radius: 14px; overflow: hidden;
-            background: #fff; transition: .2s; height: 100%;
-        }
-        .product-card:hover { box-shadow: 0 8px 24px rgba(37,99,235,.12); transform: translateY(-2px); }
-        .product-card img { width: 100%; height: 200px; object-fit: cover; background: var(--soft); }
-        .product-card .price { color: var(--brand); font-weight: 800; font-size: 1.15rem; }
-        .badge-stock { font-size: .72rem; }
         .section-title { font-weight: 800; font-size: 1.35rem; }
         .feature-box { padding: 1.5rem; border-radius: 14px; background: var(--soft); height: 100%; }
         .feature-box i { font-size: 1.6rem; color: var(--brand); }
         footer { background: var(--ink); color: #94a3b8; padding: 2.5rem 0; margin-top: 3rem; }
         footer a { color: #cbd5e1; text-decoration: none; }
     
-        /* Mobile */
+        /* iOS'ta otomatik yakınlaştırmayı önlemek için input'lar en az 16px */
         .form-control { font-size: 16px; }
         .navbar-main { padding: .65rem 0; }
         .navbar-main .container { flex-wrap: wrap; }
         .mobile-search { display: none; width: 100%; margin-top: .65rem; }
-        .cat-scroll {
-            display: flex; flex-wrap: nowrap; overflow-x: auto; gap: .35rem;
-            padding-bottom: .35rem; -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
-        }
-        .cat-scroll::-webkit-scrollbar { display: none; }
-        .cat-scroll .cat-chip { flex: 0 0 auto; white-space: nowrap; }
-        .product-card img { height: 160px; }
         @media (max-width: 767.98px) {
+            /* Mobilde kategori listesi yatay kaydırmalı şerit olur */
+            .cat-scroll {
+                display: flex; flex-wrap: nowrap; overflow-x: auto; gap: .35rem;
+                padding-bottom: .35rem; -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+            }
+            .cat-scroll::-webkit-scrollbar { display: none; }
+            .cat-scroll .cat-chip { flex: 0 0 auto; white-space: nowrap; }
             .topbar { font-size: .72rem; }
             .hero { padding: 1.75rem 0 1.25rem; }
             .hero h1 { font-size: 1.55rem; }
             .hero .btn { width: 100%; margin-bottom: .4rem; }
             .hero .d-flex.gap-2 { flex-direction: column; }
             .mobile-search { display: block; }
-            .product-card img { height: 140px; }
-            .product-card .price { font-size: 1rem; }
+            .product-card .pc-price { font-size: 1rem; }
             .section-title { font-size: 1.15rem; }
             footer { padding: 1.75rem 0; margin-top: 2rem; }
             .feature-box { padding: 1rem; }
@@ -71,6 +65,7 @@
             .mobile-search { display: none !important; }
         }
 </style>
+    @include('partials.product-card-styles')
 </head>
 <body class="@auth @if(auth()->user()->isDealer() && auth()->user()->dealer?->isActive()) has-bottom-nav @endif @endauth">
 <div class="topbar">
@@ -148,7 +143,7 @@
 </section>
 
 <div class="container py-4">
-    <div class="d-flex flex-wrap align-items-center gap-1 mb-2">
+    <div class="d-flex flex-wrap align-items-center gap-1 mb-2 cat-scroll">
         <a href="{{ route('home') }}" class="cat-chip {{ !request('kategori') ? 'active' : '' }}">Tümü</a>
         @foreach($categories as $cat)
             <a href="{{ route('home', ['kategori' => $cat, 'q' => request('q')]) }}"

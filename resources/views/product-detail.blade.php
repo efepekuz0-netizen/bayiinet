@@ -8,11 +8,6 @@
     .pd-thumbs img { width:72px; height:72px; object-fit:cover; border-radius:10px; border:2px solid transparent; cursor:pointer; background:#fff; }
     .pd-thumbs img.active, .pd-thumbs img:hover { border-color:#2563eb; }
     .pd-price { color:#2563eb; font-weight:800; font-size:1.75rem; }
-    .product-card { border:1px solid #e8edf5; border-radius:14px; overflow:hidden; background:#fff; height:100%; transition:.2s; }
-    .product-card:hover { box-shadow:0 8px 24px rgba(37,99,235,.12); transform:translateY(-2px); }
-    .product-card img { width:100%; height:180px; object-fit:cover; background:#f1f5f9; }
-    .product-card .price { color:#2563eb; font-weight:800; font-size:1.05rem; }
-    .badge-stock { font-size:.72rem; }
     @media (max-width: 575.98px) {
         .pd-price { font-size: 1.4rem; }
         .pd-gallery .main-img { height: min(320px, 70vw); }
@@ -35,7 +30,8 @@
             @endphp
             <div class="pd-gallery">
                 @if($main)
-                    <img src="{{ $main }}" alt="{{ $product->title }}" class="main-img" id="pdMainImg">
+                    <img src="{{ $main }}" alt="{{ $product->title }}" class="main-img" id="pdMainImg"
+                         onerror="this.onerror=null; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'400\' height=\'400\'><rect width=\'400\' height=\'400\' fill=\'%23f8fafc\'/><text x=\'200\' y=\'205\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'16\' fill=\'%2394a3b8\'>Görsel yüklenemedi</text></svg>';">
                     @if(count($images) > 1)
                         <div class="pd-thumbs">
                             @foreach($images as $i => $img)
@@ -52,7 +48,7 @@
         </div>
 
         <div class="col-lg-7">
-            <div class="text-muted small text-uppercase letter-spacing">{{ $product->brand ?: 'Bayiinet' }}</div>
+            <div class="text-muted small text-uppercase" style="letter-spacing:.08em">{{ $product->brand ?: 'Bayiinet' }}</div>
             <h1 class="h3 mt-1 mb-3">{{ $product->title }}</h1>
 
             <div class="pd-price mb-1">{{ number_format((float) ($product->sell_price ?? $product->price), 2, ',', '.') }} ₺</div>
@@ -81,12 +77,13 @@
                     <div class="fw-semibold small mb-1">Varyantlar</div>
                     <div class="table-responsive">
                         <table class="table table-sm table-bordered mb-0">
-                            <thead><tr><th>Seçenek</th><th>Stok</th><th>Barkod</th></tr></thead>
+                            <thead><tr><th>Seçenek</th><th>Stok</th><th>Fiyat</th><th>Barkod</th></tr></thead>
                             <tbody>
                             @foreach($product->variants as $v)
                                 <tr>
                                     <td>{{ $v->name }} {{ $v->value }}</td>
                                     <td>{{ $v->stock }}</td>
+                                    <td>{{ number_format((float) ($v->variant_price ?? ((float) ($product->sell_price ?? $product->price) + (float) ($v->price_diff ?? 0))), 2, ',', '.') }} ₺</td>
                                     <td><code>{{ $v->barcode ?: '-' }}</code></td>
                                 </tr>
                             @endforeach

@@ -122,7 +122,7 @@
                     <td>{{ $order->order_number }}</td>
                     <td>{{ $order->customer_name }}</td>
                     <td>{{ number_format($order->total, 2) }} ₺</td>
-                    <td><span class="badge text-bg-secondary">{{ $order->status }}</span></td>
+                    <td><span class="badge text-bg-{{ $order->status_tone }}">{{ $order->status_label }}</span></td>
                     <td><a href="{{ route('dealer.orders.show', $order) }}" class="btn btn-sm btn-outline-primary">Detay</a></td>
                 </tr>
             @empty

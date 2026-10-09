@@ -30,7 +30,7 @@
     </div>
     <div class="col-sm-6 col-xl-3">
         <div class="card stat-card p-3 h-100" style="border-top-color:#8b5cf6">
-            <div class="d-flex justify-content-between"><span class="text-muted small">ÜRÜN HAVUZU</span><i class="bi bi-box text-purple"></i></div>
+            <div class="d-flex justify-content-between"><span class="text-muted small">ÜRÜN HAVUZU</span><i class="bi bi-box" style="color:#8b5cf6"></i></div>
             <div class="fs-3 fw-bold">{{ number_format($stats['products']) }}</div>
             <small class="text-muted">{{ number_format($stats['stock_units']) }} toplam stok · {{ number_format($stats['active_products']) }} aktif ürün</small>
         </div>
@@ -85,7 +85,7 @@
                             <td><a href="{{ route('admin.dealers.show', $dealer) }}">{{ $dealer->company_name }}</a><div class="small text-muted">{{ $dealer->user->email ?? '' }}</div></td>
                             <td>{{ $dealer->orders_count }}</td>
                             <td>{{ number_format($dealer->balance, 2) }} ₺</td>
-                            <td><span class="badge text-bg-{{ $dealer->status === 'active' ? 'success' : 'secondary' }}">{{ $dealer->status }}</span></td>
+                            <td><span class="badge text-bg-{{ $dealer->status_tone }}">{{ $dealer->status_label }}</span></td>
                         </tr>
                     @empty
                         <tr><td colspan="4" class="text-center text-muted py-4">Henüz bayi kaydı yok.</td></tr>

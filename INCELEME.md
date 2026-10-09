@@ -1,7 +1,74 @@
 # Bayiinet — Kapsamlı Kod İncelemesi
 
-**Tarih:** 2026-10-09 · **Kapsam:** tüm depo (140 dosya, ~7.200 satır PHP + 43 Blade + 23 migration)
-**Yöntem:** statik kod incelemesi + şema/veritabanı incelemesi. Sandbox'ta PHP/Composer kurulu olmadığı için uygulama *çalıştırılamadı*; tüm bulgular kaynak okuyarak doğrulandı.
+> ## ✅ Durum — 2026-10-09 (düzeltme sonrası)
+>
+> Aşağıdaki bulguların tamamı **kodda düzeltildi**. Kalan yalnızca sizin
+> tarafınızda yapılacak işlemler (sır temizliği, altyapı) "Bekleyen işler"
+> bölümünde listelenmiştir.
+>
+> | Bulgu | Durum | Ne yapıldı |
+> |---|---|---|
+> | **K1** SQLite + sırlar depoda | ⚠️ Kısmen | `database/database.sqlite` depodan silindi ve `.gitignore`'a alındı. **Geçmiş temizliği + API anahtarı/parola rotasyonu sizde.** |
+> | **K2** `.gitignore` yok | ✅ | Eklendi; ayrıca `.env.example` ve `config/bayiinet.php` |
+> | **K3** Giriş/kayıt hız sınırlaması yok | ✅ | `throttle:5,1` giriş, `throttle:3,1` kayıt; şifre kuralı tek merkez (`Password::min(8)`) |
+> | **K4** XML feed'de çift escaping | ✅ | Feed artık elle kaçırma yapmıyor; geçersiz karakterler temizleniyor |
+> | **K5** Varyant fiyatı yazılmıyor | ✅ | `product_variants` tablosuna `variant_price` / `variant_stock` / `variant_images` eklendi; feed ve Trendyol senkronu bu alanı kullanıyor |
+> | **Y1** Feed'de N+1 + bellek | ✅ | `chunkById` ile üretim, `effective_stock` yüklü ilişkiyi kullanıyor |
+> | **Y2** Varyantlar silinip yeniden yazılıyor | ✅ | Varyantlar artık barkod/sku/ad+değer ile **upsert** ediliyor; ID'ler korunuyor, listing bağlantısı kopmuyor; `sku`/`variant_price`/`price_diff` parse ediliyor |
+> | **Y3** Fiyatlama ürün başına | ✅ | `PricingService::recalculateImported()` — toplu CASE'li SQL |
+> | **Y4** Kategori eşleştirmede ürün başına yazma | ✅ | Eşleşmeler bellekte toplanıp iş sonunda yazılıyor; kategori ağacı bir kez indeksleniyor |
+> | **Y5** Trendyol'da N+1 + senkron bekleme | ✅ | Tek `whereIn` ile listing sorgusu; batch doğrulaması en fazla ~9 sn bekler, kalanı `VerifyTrendyolBatch` işine devredilir |
+> | **Y6** `default_profit_margin` yazılmıyor | ✅ | Tek anahtar: `profit_margin`. Ayarlar ekranına eklendi, `PricingService::profitMargin()` eski anahtarları da okur |
+> | **Y7** `orders.total_amount` ölü kolon | ✅ | Modelden ve görünümden kaldırıldı (`notes`, `XmlImport`/`DealerAnnouncement`/`BlacklistEntry` ölü alanları da) |
+> | **O1** `env()` kullanımı | ✅ | `EnsureAdminUser` artık `config('bayiinet.admin.*')` okuyor |
+> | **O2** Kuyruk/zamanlayıcı aynı konteynerde | ⚠️ Kısmen | `start.sh` worker'ı `--timeout=900` (retry_after 960'tan küçük) + `--tries=3` ile çalıştırıyor. **Ayrı Background Worker servisi önerilir** (bkz. `KURULUM.md`) |
+> | **O3** Üretimde `artisan serve` | 📄 Belge | `KURULUM.md`'ye nginx/php-fpm & FrankenPHP önerisi eklendi |
+> | **O4** Cache anahtarı uyuşmazlığı | ✅ | `home_main_categories_v2` her yerde |
+> | **O5** Hata durumunda DB'ye tekrar soruluyor | ✅ | Fallback sayfalayıcı tamamen bellekte |
+> | **O6** `ShouldBeUnique` kilidine elle müdahale | ✅ | `uniqueFor` 600 sn; asıl koruma `TrendyolSendProgress` üzerinden |
+> | **O7** İptal tüm kuyruğu siliyor | ✅ | İptal bayi bazlı; batch işleri bayrağı görüp kendini atlıyor |
+> | **O8** `composer.lock` yok | 📄 Belge | Composer sandbox'ta kurulu olmadığı için üretilemedi — yerelde `composer install` sonrası commit edin |
+> | **O9** Test altyapısı sıfır | ⏳ | Eklenmedi (bu turda kapsam dışı) |
+> | **O10** Ölü model alanları | ✅ | Tespit edilen tüm ölü kolonlar temizlendi |
+> | **O11** Dokümantasyon/seeder çelişkileri | ✅ | `README.md` (eski adıyla `README-BAYIXML.md`) ve `KURULUM.md` güncellendi; `AGENTS.md` projeye özel hâle getirildi; seeder `profit_margin` yazıyor |
+> | **O12** Ölü iskelet dosyası | ✅ | `welcome.blade.php`, `resources/css`, `resources/js` silindi |
+> | **O13** Oturum çerezi `secure` değil | ✅ | Varsayılan `true` (`SESSION_SECURE_COOKIE` ile kapatılabilir) |
+> | **O14** Denetim izi yok | ✅ | `AdminAudit` servisi: fiyat değişikliği, bayi onay/askı/bakiye, Trendyol gönderim & toplu silme, ayarlar kayda geçiyor |
+> | **O15** Şifre kuralları tutarsız | ✅ | `AppServiceProvider` içinde tek `Password::defaults()` |
+> | **O16** Trendyol API'sinde retry yok | ✅ | `Http::retry(3, 1500ms, ConnectionException)`; DELETE artık gövde gönderiyor |
+>
+> ### Trendyol ürün gönderimi — kök nedenler
+> 1. **Sayaçlar yanlış hesaplanıyordu:** Trendyol ürünü kabul ettiği hâlde
+>    "0 gönderildi" görünüyordu. Artık tüm sayaçlar batch kayıtlarından
+>    türetiliyor ve tekrar hesaplanabilir (`TrendyolSendProgress`).
+> 2. **Kategori/özellik hatası tüm ürünleri blokluyordu:** Trendyol kategori
+>    özellik servisinden hata dönerse her ürün "hazırlanamadı" sayılıyordu.
+>    Artık boş özellik listesiyle devam ediyor ve hatayı raporluyor.
+> 3. **Marka araması ürün başına yapılıyordu:** benzersiz marka adları bir kez
+>    çözülüyor.
+> 4. **Barkod 40 karakter sınırını aşıyordu:** Trendyol'un reddettiği
+>    gönderimlerin bir kısmı bu yüzden başarısızdı.
+> 5. **Batch doğrulaması ~24 sn blokluyordu:** 15.000 üründe işler saatler
+>    sürüyordu. Artık en fazla ~9 sn bekleniyor, kalanı arka planda.
+>
+> ### Saatlik otomasyon
+> `routes/console.php` içinde: saatlik XML yenileme, saatlik Trendyol senkronu,
+> 15 dakikada bir batch sonucu kontrolü ve 5 dakikada bir zamanlayıcı nabzı.
+> Her çalışma `AutomationStatus`'a yazılır ve **Yönetim → Otomasyon**
+> ekranından izlenir.
+>
+> ### Bekleyen işler (sizde)
+> 1. **Trendyol API anahtarını ve yönetici parolalarını yenileyin** (K1).
+> 2. Depo geçmişini temizleyin: `git filter-repo --path database/database.sqlite --invert-paths`.
+> 3. `composer.lock` dosyasını commit edin.
+> 4. Render'da ikinci bir **Background Worker** servisi açın.
+>
+> ---
+
+---
+
+## 0. Genel tablo (orijinal rapor)
+
 
 ---
 

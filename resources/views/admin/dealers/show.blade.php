@@ -4,9 +4,7 @@
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <div>
         <h4 class="mb-0">{{ $dealer->company_name }}</h4>
-        <span class="badge bg-{{ $dealer->status === 'active' ? 'success' : ($dealer->status === 'pending' ? 'warning' : 'secondary') }}">
-            {{ $dealer->status }}
-        </span>
+        <span class="badge text-bg-{{ $dealer->status_tone }}">{{ $dealer->status_label }}</span>
         @if($dealer->last_synced_at)
             <span class="text-muted small ms-2">Son XML aktarım: {{ $dealer->last_synced_at->format('d.m.Y H:i') }}</span>
         @endif

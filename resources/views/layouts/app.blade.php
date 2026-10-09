@@ -6,6 +6,8 @@
     <meta name="theme-color" content="#345cf5">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>@yield('title', 'Bayiinet') - XML Bayilik Sistemi</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23345cf5'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='sans-serif' font-weight='700' font-size='17' fill='white'%3EB%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
@@ -162,6 +164,7 @@
         .storefront-pad { padding-bottom: env(safe-area-inset-bottom); }
         @stack('styles')
     </style>
+    @include('partials.product-card-styles')
     @stack('head')
 </head>
 <body>

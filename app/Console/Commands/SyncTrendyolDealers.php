@@ -6,7 +6,6 @@ use App\Jobs\SendDealerTrendyolCatalog;
 use App\Jobs\SyncDealerTrendyolInventory;
 use App\Models\Dealer;
 use App\Services\AutomationStatus;
-use App\Services\DealerTrendyolService;
 use App\Services\TrendyolSendProgress;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;

@@ -3,14 +3,15 @@
 @section('content')
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h4 class="mb-0">{{ $order->order_number }}</h4>
-    <span class="badge bg-secondary fs-6">{{ $order->status }}</span>
+    <span class="badge text-bg-{{ $order->status_tone }} fs-6">{{ $order->status_label }}</span>
 </div>
 
 <div class="row g-3">
     <div class="col-md-8">
         <div class="card mb-3">
             <div class="card-header bg-white fw-semibold">Ürünler</div>
-            <table class="table mb-0">
+            <div class="table-responsive">
+            <table class="table mb-0 align-middle">
                 <thead><tr><th>Ürün</th><th>Adet</th><th>Birim</th><th>Toplam</th></tr></thead>
                 <tbody>
                 @foreach($order->items as $item)
@@ -26,6 +27,7 @@
                     <tr><td colspan="3" class="text-end fw-semibold">Toplam</td><td class="fw-bold">{{ number_format($order->total, 2) }} ₺</td></tr>
                 </tfoot>
             </table>
+            </div>
         </div>
     </div>
     <div class="col-md-4">

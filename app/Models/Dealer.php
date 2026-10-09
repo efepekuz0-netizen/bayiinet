@@ -47,6 +47,24 @@ class Dealer extends Model
         'suspended_at' => 'datetime',
     ];
 
+    /** @var array<string, array{0: string, 1: string}> */
+    public const STATUS_LABELS = [
+        'pending' => ['Onay bekliyor', 'warning'],
+        'active' => ['Aktif', 'success'],
+        'suspended' => ['Askıda', 'danger'],
+        'rejected' => ['Reddedildi', 'dark'],
+    ];
+
+    public function getStatusLabelAttribute(): string
+    {
+        return self::STATUS_LABELS[$this->status][0] ?? (string) $this->status;
+    }
+
+    public function getStatusToneAttribute(): string
+    {
+        return self::STATUS_LABELS[$this->status][1] ?? 'secondary';
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);

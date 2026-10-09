@@ -1,17 +1,7 @@
 @extends('layouts.app')
 @section('title', 'Siparişler')
 @section('content')
-@php
-    $statusLabels = [
-        'pending' => ['Bekliyor', 'warning'],
-        'paid' => ['Ödendi', 'info'],
-        'preparing' => ['Hazırlanıyor', 'primary'],
-        'shipped' => ['Kargoda', 'secondary'],
-        'delivered' => ['Teslim', 'success'],
-        'cancelled' => ['İptal', 'dark'],
-        'returned' => ['İade', 'danger'],
-    ];
-@endphp
+@php($statusLabels = \App\Models\Order::STATUS_LABELS)
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <h4 class="mb-0">Siparişler</h4>
 </div>

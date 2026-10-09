@@ -35,6 +35,24 @@ class XmlImport extends Model
         'finished_at' => 'datetime',
     ];
 
+    /** @var array<string, array{0: string, 1: string}> */
+    public const STATUS_LABELS = [
+        'pending' => ['Bekliyor', 'secondary'],
+        'processing' => ['İşleniyor', 'info'],
+        'completed' => ['Tamamlandı', 'success'],
+        'failed' => ['Başarısız', 'danger'],
+    ];
+
+    public function getStatusLabelAttribute(): string
+    {
+        return self::STATUS_LABELS[$this->status][0] ?? (string) $this->status;
+    }
+
+    public function getStatusToneAttribute(): string
+    {
+        return self::STATUS_LABELS[$this->status][1] ?? 'secondary';
+    }
+
     public function source(): BelongsTo
     {
         return $this->belongsTo(Source::class);
