@@ -77,12 +77,40 @@ class Product extends Model
         return $this->hasMany(OrderItem::class);
     }
 
+    /**
+     * Varyantlı üründe toplam stok. Varyantlar önceden yüklenmişse ek sorgu
+     * atmaz (liste/feed sayfalarında N+1 oluşuyordu).
+     */
     public function getEffectiveStockAttribute(): int
     {
         if ($this->has_variants) {
-            return $this->variants()->sum('stock') ?? 0;
+            if ($this->relationLoaded('variants')) {
+                return (int) $this->variants->sum('stock');
+            }
+
+            return (int) ($this->variants()->sum('stock') ?? 0);
         }
 
         return (int) $this->stock;
+    }
+
+    /**
+     * Bayiye görünen alış fiyatı ve önerilen satış fiyatı.
+     *
+     * @return array{sale: float, margin: float|null, retail: float|null}
+     */
+    public function priceForDealer(?Dealer $dealer = null): array
+    {
+        $pricing = app(PricingService::class);
+        $sale = (float) ($this->sell_price ?? $this->price ?? 0);
+        $margin = $dealer !== null
+            ? (float) ($dealer->default_marketplace_margin ?? $pricing->defaultMarketplaceMargin())
+            : null;
+
+        return [
+            'sale' => $sale,
+            'margin' => $margin,
+            'retail' => $margin !== null ? $pricing->calculateDealerRetailPrice($sale, $margin) : null,
+        ];
     }
 }

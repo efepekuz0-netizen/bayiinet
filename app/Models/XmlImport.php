@@ -13,10 +13,7 @@ class XmlImport extends Model
         'file_name',
         'file_path',
         'status',
-        'products_created',
-        'products_updated',
         'errors',
-        'completed_at',
         'total_products',
         'created_count',
         'updated_count',
@@ -28,15 +25,12 @@ class XmlImport extends Model
     ];
 
     protected $casts = [
-        'products_created' => 'integer',
-        'products_updated' => 'integer',
         'total_products' => 'integer',
         'created_count' => 'integer',
         'updated_count' => 'integer',
         'skipped_count' => 'integer',
         'error_count' => 'integer',
         'errors' => 'array',
-        'completed_at' => 'datetime',
         'started_at' => 'datetime',
         'finished_at' => 'datetime',
     ];

@@ -20,7 +20,7 @@ class DeleteDealerTrendyolProducts implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 900;
+    public int $timeout = 840;
 
     public int $tries = 1;
 

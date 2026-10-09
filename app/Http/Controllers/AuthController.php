@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\Support\Str;
 
 class AuthController extends Controller
@@ -63,7 +64,7 @@ class AuthController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
-            'password' => 'required|min:6|confirmed',
+            'password' => ['required', 'confirmed', Password::min(8)],
             'company_name' => 'required|string|max:255',
             'phone' => 'nullable|string|max:20',
             'city' => 'nullable|string|max:100',

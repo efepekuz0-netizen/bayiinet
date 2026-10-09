@@ -16,9 +16,7 @@ class Order extends Model
         'customer_name',
         'customer_phone',
         'customer_city',
-        'notes',
         'status',
-        'total_amount',
         'created_at',
         'customer_district',
         'customer_address',
@@ -38,7 +36,6 @@ class Order extends Model
     ];
 
     protected $casts = [
-        'total_amount' => 'decimal:2',
         'subtotal' => 'decimal:2',
         'shipping_cost' => 'decimal:2',
         'total' => 'decimal:2',

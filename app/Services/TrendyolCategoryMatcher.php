@@ -8,6 +8,11 @@ use Illuminate\Support\Facades\Cache;
 
 /**
  * Masaüstü product_onboard.match_category + category_map ile aynı mantık.
+ *
+ * Performans notu: kategori ağacı (binlerce yaprak) her ürün için yeniden
+ * normalize ediliyordu. Artık yaprak listesi bir kez indeksleniyor ve
+ * bulunan eşleşmeler kategori haritasına yazılıp sonraki ürünlerde
+ * doğrudan kullanılıyor.
  */
 class TrendyolCategoryMatcher
 {
@@ -75,35 +80,107 @@ class TrendyolCategoryMatcher
         ['drone', 'Drone'],
     ];
 
+    /** @var array<string, mixed>|null */
+    private ?array $mapCache = null;
+
+    private bool $mapDirty = false;
+
+    /** Yaprak listesi için hazırlanan indeks */
+    private array $index = [];
+
+    private ?string $indexKey = null;
+
+    /** Bu çalışmada eşleşme bulunamayan kategori anahtarları (tekrar taramamak için) */
+    private array $missed = [];
+
     public function map(): array
     {
-        $raw = PlatformSetting::read('trendyol_category_map', '');
-        if ($raw === '') {
-            return ['by_xml' => [], 'by_id' => [], 'fallback_id' => 0, 'fallback_brand_id' => 0];
+        if ($this->mapCache !== null) {
+            return $this->mapCache;
         }
+
+        return $this->mapCache = $this->loadFromDb();
+    }
+
+    private function loadFromDb(): array
+    {
+        $empty = ['by_xml' => [], 'by_id' => [], 'fallback_id' => 0, 'fallback_brand_id' => 0];
+        $raw = (string) PlatformSetting::read('trendyol_category_map', '');
+
+        if ($raw === '') {
+            return $empty;
+        }
+
         $data = json_decode($raw, true);
 
-        return is_array($data)
-            ? array_merge(['by_xml' => [], 'by_id' => [], 'fallback_id' => 0, 'fallback_brand_id' => 0], $data)
-            : ['by_xml' => [], 'by_id' => [], 'fallback_id' => 0, 'fallback_brand_id' => 0];
+        return is_array($data) ? array_merge($empty, $data) : $empty;
     }
 
+    /**
+     * Haritayı doğrudan yazar (yönetim panelinden kaydedilen elle eşleme).
+     */
     public function saveMap(array $data): void
     {
-        PlatformSetting::write('trendyol_category_map', json_encode($data, JSON_UNESCAPED_UNICODE));
+        $current = $this->map();
+        $this->mapCache = array_merge($current, $data);
+        $this->persist();
     }
 
+    /**
+     * Bulunan eşleşmeyi kaydeder. Yazma işlemi toplu yapılır (flush),
+     * aksi hâlde her ürün için bir veritabanı yazması oluşuyordu.
+     */
     public function remember(string $xmlKey, int $catId, string $catName = ''): void
     {
-        $data = $this->map();
+        $map = $this->map();
         $key = mb_strtolower(trim($xmlKey));
+
         if ($key !== '') {
-            $data['by_xml'][$key] = ['id' => $catId, 'name' => $catName];
+            $map['by_xml'][$key] = ['id' => $catId, 'name' => $catName];
         }
         if ($catId > 0) {
-            $data['by_id'][(string) $catId] = $catName;
+            $map['by_id'][(string) $catId] = $catName;
         }
-        $this->saveMap($data);
+
+        $this->mapCache = $map;
+        $this->mapDirty = true;
+    }
+
+    /**
+     * Bellekte biriken eşleme değişikliklerini veritabanına yazar.
+     */
+    public function flush(): void
+    {
+        if (! $this->mapDirty) {
+            return;
+        }
+
+        $this->persist(false);
+    }
+
+    /**
+     * @param  bool  $replace  true: harita olduğu gibi yazılır (yönetim paneli).
+     *                         false: veritabanındaki haritayla birleştirilir
+     *                         (aynı anda çalışan kuyruk işlerinin bulduğu
+     *                         eşleşmeler birbirini ezmesin).
+     */
+    private function persist(bool $replace = true): void
+    {
+        $current = $this->mapCache ?? $this->loadFromDb();
+
+        if (! $replace) {
+            $fresh = $this->loadFromDb();
+            $current = [
+                'by_xml' => array_merge($fresh['by_xml'], $current['by_xml'] ?? []),
+                'by_id' => array_merge($fresh['by_id'], $current['by_id'] ?? []),
+                'fallback_id' => (int) ($current['fallback_id'] ?? 0) ?: (int) ($fresh['fallback_id'] ?? 0),
+                'fallback_brand_id' => (int) ($current['fallback_brand_id'] ?? 0) ?: (int) ($fresh['fallback_brand_id'] ?? 0),
+            ];
+        }
+
+        PlatformSetting::write('trendyol_category_map', json_encode($current, JSON_UNESCAPED_UNICODE));
+        $this->mapCache = $current;
+        $this->mapDirty = false;
     }
 
     public function setFallback(int $categoryId, int $brandId = 0): void
@@ -115,7 +192,8 @@ class TrendyolCategoryMatcher
         if ($brandId > 0) {
             $data['fallback_brand_id'] = $brandId;
         }
-        $this->saveMap($data);
+        $this->mapCache = $data;
+        $this->persist();
     }
 
     public function fallbackBrandId(): int
@@ -141,6 +219,7 @@ class TrendyolCategoryMatcher
         $map = $this->map();
         $xmlPath = (string) ($product->category_path ?? '');
         $title = (string) ($product->title ?? '');
+        $mapKey = mb_strtolower(trim($xmlPath !== '' ? $xmlPath : $title));
 
         // 1) Kaydedilmiş eşleme
         foreach (array_filter([$xmlPath, $product->main_category, $product->sub_category, $title]) as $k) {
@@ -152,28 +231,26 @@ class TrendyolCategoryMatcher
                         return ['id' => $id, 'name' => $leaf['name'], 'reason' => 'saved'];
                     }
                 }
+
                 return ['id' => $id, 'name' => (string) ($map['by_xml'][$lk]['name'] ?? ''), 'reason' => 'saved'];
             }
         }
 
+        // Bu kategori için daha önce hiç sonuç bulunamadıysa tekrar tarama yapma
+        if ($mapKey !== '' && isset($this->missed[$mapKey])) {
+            return $this->fallbackResult();
+        }
+
         if ($leaves === []) {
-            $fb = $this->fallbackCategoryId();
-
-            return ['id' => $fb > 0 ? $fb : null, 'name' => '', 'reason' => $fb > 0 ? 'fallback' : 'none'];
+            return $this->fallbackResult();
         }
 
-        $byName = [];
-        $byNorm = [];
-        foreach ($leaves as $leaf) {
-            $n = mb_strtolower($leaf['name']);
-            $byName[$n][] = $leaf;
-            $byNorm[$this->normalize($leaf['name'])][] = $leaf;
-        }
+        $idx = $this->indexFor($leaves);
 
         // 2) XML kategori parçaları / main_category
-        $parts = array_filter(array_map('trim', preg_split('/>>>|>|\//', $xmlPath) ?: []));
+        $parts = array_values(array_filter(array_map('trim', preg_split('/>>>|>|\\//', $xmlPath) ?: [])));
         $candidates = array_values(array_filter(array_merge(
-            [end($parts) ?: '', (string) $product->main_category, (string) $product->sub_category],
+            [$parts !== [] ? end($parts) : '', (string) $product->main_category, (string) $product->sub_category],
             array_reverse($parts),
         )));
 
@@ -182,26 +259,17 @@ class TrendyolCategoryMatcher
                 continue;
             }
             $cl = mb_strtolower($c);
-            if (isset($byName[$cl][0])) {
-                $hit = $byName[$cl][0];
-                $this->remember($xmlPath ?: $c, (int) $hit['id'], $hit['name']);
-
-                return ['id' => (int) $hit['id'], 'name' => $hit['name'], 'reason' => 'name'];
+            if (isset($idx['byName'][$cl][0])) {
+                return $this->hit($idx, $idx['byName'][$cl][0], 'name', $xmlPath ?: $c);
             }
             $cn = $this->normalize($c);
-            if ($cn !== '' && isset($byNorm[$cn][0])) {
-                $hit = $byNorm[$cn][0];
-                $this->remember($xmlPath ?: $c, (int) $hit['id'], $hit['name']);
-
-                return ['id' => (int) $hit['id'], 'name' => $hit['name'], 'reason' => 'norm'];
+            if ($cn !== '' && isset($idx['byNorm'][$cn][0])) {
+                return $this->hit($idx, $idx['byNorm'][$cn][0], 'norm', $xmlPath ?: $c);
             }
             if (strlen($cn) >= 4) {
-                foreach ($leaves as $leaf) {
-                    $ln = $this->normalize($leaf['name']);
+                foreach ($idx['norms'] as $i => $ln) {
                     if ($cn === $ln || str_contains($ln, $cn) || str_contains($cn, $ln)) {
-                        $this->remember($xmlPath ?: $c, (int) $leaf['id'], $leaf['name']);
-
-                        return ['id' => (int) $leaf['id'], 'name' => $leaf['name'], 'reason' => 'partial'];
+                        return $this->hit($idx, $i, 'partial', $xmlPath ?: $c);
                     }
                 }
             }
@@ -214,50 +282,130 @@ class TrendyolCategoryMatcher
                 continue;
             }
             $tn = mb_strtolower($tyName);
-            if (isset($byName[$tn][0])) {
-                $hit = $byName[$tn][0];
-                $this->remember($xmlPath ?: $needle, (int) $hit['id'], $hit['name']);
-
-                return ['id' => (int) $hit['id'], 'name' => $hit['name'], 'reason' => 'keyword:'.$tyName];
+            if (isset($idx['byName'][$tn][0])) {
+                return $this->hit($idx, $idx['byName'][$tn][0], 'keyword:'.$tyName, $xmlPath ?: $needle);
             }
             $nn = $this->normalize($tyName);
-            if (isset($byNorm[$nn][0])) {
-                $hit = $byNorm[$nn][0];
-                $this->remember($xmlPath ?: $needle, (int) $hit['id'], $hit['name']);
-
-                return ['id' => (int) $hit['id'], 'name' => $hit['name'], 'reason' => 'keyword:'.$tyName];
+            if (isset($idx['byNorm'][$nn][0])) {
+                return $this->hit($idx, $idx['byNorm'][$nn][0], 'keyword:'.$tyName, $xmlPath ?: $needle);
             }
         }
 
-        // 4) Token skoru
-        $tokens = array_values(array_filter(explode(' ', $blob), fn ($t) => strlen($t) >= 4));
-        $best = null;
-        $bestScore = 0;
-        foreach ($leaves as $leaf) {
-            $leafN = $this->normalize($leaf['name']);
-            $pathN = $this->normalize($leaf['path']);
-            $score = 0;
-            foreach ($tokens as $t) {
-                if (str_contains($leafN, $t)) {
-                    $score += 3;
-                } elseif (str_contains($pathN, $t)) {
-                    $score += 1;
+        // 4) Token skoru (ters indeks üzerinden)
+        $tokens = array_values(array_unique(array_filter(explode(' ', $blob), fn ($t): bool => strlen($t) >= 4)));
+        $scores = [];
+        $nameHits = [];
+        foreach ($tokens as $t) {
+            foreach ($idx['tokens'][$t] ?? [] as $i) {
+                $scores[$i] = ($scores[$i] ?? 0) + 3;
+                $nameHits[$i][$t] = true;
+            }
+            foreach ($idx['pathTokens'][$t] ?? [] as $i) {
+                if (! isset($nameHits[$i][$t])) {
+                    $scores[$i] = ($scores[$i] ?? 0) + 1;
                 }
             }
-            if ($score > $bestScore) {
-                $bestScore = $score;
-                $best = $leaf;
+        }
+
+        if ($scores !== []) {
+            arsort($scores);
+            $bestIndex = (int) array_key_first($scores);
+            $bestScore = (int) reset($scores);
+
+            if ($bestScore >= 1) {
+                return $this->hit(
+                    $idx,
+                    $bestIndex,
+                    'score:'.$bestScore,
+                    $xmlPath ?: mb_substr($title, 0, 40)
+                );
             }
         }
-        if ($best && $bestScore >= 1) {
-            $this->remember($xmlPath ?: mb_substr($title, 0, 40), (int) $best['id'], $best['name']);
 
-            return ['id' => (int) $best['id'], 'name' => $best['name'], 'reason' => 'score:'.$bestScore];
+        if ($mapKey !== '') {
+            $this->missed[$mapKey] = true;
         }
 
+        return $this->fallbackResult();
+    }
+
+    /**
+     * @return array{id: int|null, name: string, reason: string}
+     */
+    private function fallbackResult(): array
+    {
         $fb = $this->fallbackCategoryId();
 
         return ['id' => $fb > 0 ? $fb : null, 'name' => '', 'reason' => $fb > 0 ? 'fallback' : 'none'];
+    }
+
+    /**
+     * @return array{id: int, name: string, reason: string}
+     */
+    private function hit(array $idx, int $i, string $reason, string $rememberKey): array
+    {
+        $leaf = $idx['leaves'][$i];
+        $this->remember($rememberKey, (int) $leaf['id'], (string) $leaf['name']);
+
+        return ['id' => (int) $leaf['id'], 'name' => (string) $leaf['name'], 'reason' => $reason];
+    }
+
+    /**
+     * Yaprak listesini bir kez indeksler (normalize edilmiş ad, yol ve
+     * ters token indeksi). Aynı liste tekrar gelirse indeks yeniden kurulmaz.
+     *
+     * @param  list<array{id:int,name:string,path:string}>  $leaves
+     * @return array{leaves: array, byName: array, byNorm: array, norms: array, tokens: array, pathTokens: array}
+     */
+    private function indexFor(array $leaves): array
+    {
+        $key = count($leaves).':'.md5(implode(',', array_column($leaves, 'id')));
+        if ($this->indexKey === $key) {
+            return $this->index;
+        }
+        $this->indexKey = $key;
+
+        $byName = [];
+        $byNorm = [];
+        $norms = [];
+        $tokens = [];
+        $pathTokens = [];
+
+        foreach ($leaves as $i => $leaf) {
+            $name = (string) ($leaf['name'] ?? '');
+            $byName[mb_strtolower($name)][] = $i;
+
+            $norm = $this->normalize($name);
+            $byNorm[$norm][] = $i;
+            $norms[$i] = $norm;
+
+            foreach ($this->tokensOf($norm) as $t) {
+                $tokens[$t][] = $i;
+            }
+            foreach ($this->tokensOf($this->normalize((string) ($leaf['path'] ?? ''))) as $t) {
+                $pathTokens[$t][] = $i;
+            }
+        }
+
+        return $this->index = [
+            'leaves' => $leaves,
+            'byName' => $byName,
+            'byNorm' => $byNorm,
+            'norms' => $norms,
+            'tokens' => $tokens,
+            'pathTokens' => $pathTokens,
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function tokensOf(string $normalized): array
+    {
+        return array_values(array_unique(array_filter(
+            explode(' ', $normalized),
+            fn (string $t): bool => strlen($t) >= 4
+        )));
     }
 
     private function normalize(string $s): string
@@ -270,6 +418,6 @@ class TrendyolCategoryMatcher
         $s = strtr($s, $map);
         $s = preg_replace('/[^a-z0-9]+/u', ' ', $s) ?? $s;
 
-        return trim(preg_replace('/\s+/', ' ', $s) ?? $s);
+        return trim(preg_replace('/\\s+/', ' ', $s) ?? $s);
     }
 }

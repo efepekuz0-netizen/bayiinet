@@ -8,13 +8,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class BlacklistEntry extends Model
 {
     protected $fillable = [
-        'entry_type',
-        'entry_value',
-        'reason',
-        'notes',
-        'created_by',
         'type',
         'value',
+        'reason',
+        'created_by',
     ];
 
     public function creator(): BelongsTo

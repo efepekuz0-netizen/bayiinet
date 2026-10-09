@@ -11,6 +11,26 @@ class PricingService
 {
     private ?array $defaults = null;
 
+    /**
+     * Platformun genel kâr oranı (%).
+     *
+     * Geçmişte üç farklı anahtar kullanıldı (default_profit_margin,
+     * default_margin_percent, xml_margin_percent) ve hiçbiri yazılmıyordu;
+     * bu yüzden paneldeki "tahmini kazanç" ve bayi kataloğundaki kâr oranı
+     * hep 0 çıkıyordu. Artık tek anahtar: profit_margin.
+     */
+    public function profitMargin(): float
+    {
+        foreach (['profit_margin', 'default_profit_margin', 'default_margin_percent'] as $key) {
+            $value = PlatformSetting::read($key, null);
+            if ($value !== null && $value !== '' && is_numeric($value)) {
+                return (float) $value;
+            }
+        }
+
+        return (float) PlatformSetting::read('xml_margin_percent', '15');
+    }
+
     private function defaults(): array
     {
         return $this->defaults ??= [
@@ -118,8 +138,58 @@ class PricingService
      * Performans odaklı toplu kar oranı uygulaması.
      * Model event'leri ve N+1 olmadan, büyük chunk'larla günceller.
      */
+    /**
+     * Performans odaklı toplu kar oranı uygulaması.
+     * Model event'leri ve N+1 olmadan, büyük chunk'larla günceller.
+     */
     public function bulkApplyXmlMargin(float $marginPercent, bool $overrideTax = false, ?int $sourceId = null): int
     {
+        $count = $this->recalculate(
+            marginPercent: $marginPercent,
+            respectProductMargin: false,
+            overrideTax: $overrideTax,
+            sourceId: $sourceId,
+        );
+
+        if ($sourceId === null) {
+            PlatformSetting::write('xml_margin_percent', $marginPercent);
+        }
+
+        return $count;
+    }
+
+    /**
+     * Yeni içe aktarılan ürünlerin satış fiyatlarını toplu hesaplar.
+     * Ürün başına modele dokunmaz (15.000 üründe ~45.000 sorgu yerine birkaç
+     * toplu UPDATE çalışır) ve ürüne özel tanımlanmış kâr oranını korur.
+     *
+     * @param  array<int, int>  $productIds
+     */
+    public function recalculateImported(array $productIds, ?int $sourceId, float $marginPercent): int
+    {
+        if ($productIds === []) {
+            return 0;
+        }
+
+        return $this->recalculate(
+            marginPercent: $marginPercent,
+            respectProductMargin: true,
+            overrideTax: false,
+            sourceId: $sourceId,
+            productIds: $productIds,
+        );
+    }
+
+    /**
+     * @param  array<int, int>|null  $productIds
+     */
+    private function recalculate(
+        float $marginPercent,
+        bool $respectProductMargin,
+        bool $overrideTax,
+        ?int $sourceId = null,
+        ?array $productIds = null,
+    ): int {
         $defaults = $this->defaults();
         $globalMin = $defaults['min_margin'];
         $globalTax = $defaults['tax_rate'];
@@ -153,10 +223,12 @@ class PricingService
 
         Product::query()
             ->when($sourceId, fn ($q) => $q->where('source_id', $sourceId))
-            ->select(['id', 'source_id', 'cost_price', 'price', 'tax_rate', 'min_margin_percent'])
+            ->when($productIds !== null, fn ($q) => $q->whereIn('id', $productIds))
+            ->select(['id', 'source_id', 'cost_price', 'price', 'tax_rate', 'min_margin_percent', 'xml_margin_percent'])
             ->orderBy('id')
             ->chunkById(250, function ($products) use (
                 $marginPercent,
+                $respectProductMargin,
                 $overrideTax,
                 $sourceSettings,
                 $globalMin,
@@ -171,10 +243,14 @@ class PricingService
                     $cost = (float) ($product->cost_price ?? $product->price ?? 0);
                     $src = $sourceSettings[$product->source_id] ?? null;
 
-                    $min = $src['min'] ?? ($product->min_margin_percent !== null
+                    $min = (float) ($src['min'] ?? ($product->min_margin_percent !== null
                         ? (float) $product->min_margin_percent
-                        : $globalMin);
-                    $effectiveMargin = max($marginPercent, (float) $min);
+                        : $globalMin));
+
+                    // Ürüne özel bir kâr oranı tanımlanmışsa içe aktarma onu ezmez.
+                    $effectiveMargin = $respectProductMargin && $product->xml_margin_percent !== null
+                        ? max((float) $product->xml_margin_percent, $min)
+                        : max($marginPercent, $min);
 
                     $tax = $overrideTax
                         ? ($src['tax'] ?? $globalTax)
@@ -231,10 +307,6 @@ class PricingService
                     }
                 }
             });
-
-        if ($sourceId === null) {
-            PlatformSetting::write('xml_margin_percent', $marginPercent);
-        }
 
         return $count;
     }

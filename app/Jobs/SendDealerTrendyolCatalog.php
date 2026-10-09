@@ -4,13 +4,13 @@ namespace App\Jobs;
 
 use App\Models\Dealer;
 use App\Models\Product;
+use App\Services\TrendyolSendProgress;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -25,15 +25,16 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 120;
+    public int $timeout = 300;
 
     public int $tries = 1;
 
     public int $maxExceptions = 1;
 
-    public int $uniqueFor = 120;
+    // Kuyruk kilitli kalırsa (işçi çökmesi vb.) en fazla 10 dk beklenir.
+    public int $uniqueFor = 600;
 
-    public const BATCH_SIZE = 40;
+    public const DEFAULT_BATCH_SIZE = 40;
 
     /**
      * @param  array<int, int>|null  $productIds
@@ -58,13 +59,13 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
 
     public function handle(): void
     {
+        if (TrendyolSendProgress::isCancelled($this->dealerId)) {
+            return;
+        }
+
         $dealer = Dealer::query()->find($this->dealerId);
         if (! $dealer || ! $dealer->hasTrendyolCredentials()) {
-            Cache::put('trendyol_send_status_'.$this->dealerId, [
-                'status' => 'error',
-                'message' => 'Bayi veya Trendyol API bilgisi yok.',
-                'finished_at' => now()->toIso8601String(),
-            ], now()->addHours(6));
+            TrendyolSendProgress::fail($this->dealerId, 'Bayi veya Trendyol API bilgisi yok.');
 
             return;
         }
@@ -82,55 +83,40 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
                 })
                 ->orderBy('id');
 
-            if ($this->productIds !== null) {
+            if ($this->productIds !== null && $this->productIds !== []) {
                 $query->whereIn('id', $this->productIds);
             }
 
             if ($this->onlyMissing) {
-                $listed = $dealer->trendyolListings()
-                    ->whereIn('status', ['sent', 'created', 'pending'])
-                    ->pluck('product_id')
-                    ->unique()
-                    ->filter()
-                    ->all();
-                if ($listed !== []) {
-                    $query->whereNotIn('id', $listed);
-                }
+                // Alt sorgu kullanılır: on binlerce id PHP'ye çekilmez.
+                $query->whereNotIn('id', function ($sub) use ($dealer): void {
+                    $sub->select('product_id')
+                        ->from('dealer_trendyol_listings')
+                        ->where('dealer_id', $dealer->id)
+                        ->whereIn('status', ['sent', 'created', 'pending'])
+                        ->whereNotNull('product_id');
+                });
             }
 
             $ids = $query->pluck('id')->all();
             $total = count($ids);
 
             if ($total === 0) {
-                Cache::put('trendyol_send_status_'.$dealer->id, [
-                    'status' => 'done',
-                    'sent' => 0,
-                    'failed' => 0,
-                    'processed' => 0,
-                    'total' => 0,
-                    'message' => 'Gönderilecek ürün yok.',
-                    'finished_at' => now()->toIso8601String(),
-                ], now()->addHours(12));
+                TrendyolSendProgress::finish(
+                    $dealer->id,
+                    $this->onlyMissing
+                        ? 'Gönderilecek yeni ürün yok — tüm stoklu ürünler zaten Trendyol’a gönderilmiş.'
+                        : 'Gönderilecek stoklu ürün bulunamadı.'
+                );
 
                 return;
             }
 
-            $chunks = array_chunk($ids, self::BATCH_SIZE);
+            $batchSize = max(1, (int) config('bayiinet.trendyol.batch_size', self::DEFAULT_BATCH_SIZE));
+            $chunks = array_chunk($ids, $batchSize);
             $totalBatches = count($chunks);
 
-            Cache::put('trendyol_send_status_'.$dealer->id, [
-                'status' => 'running',
-                'sent' => 0,
-                'failed' => 0,
-                'processed' => 0,
-                'total' => $total,
-                'batches_done' => 0,
-                'total_batches' => $totalBatches,
-                'errors' => [],
-                'batch_ids' => [],
-                'message' => "0 / {$total} kuyruğa alındı ({$totalBatches} parça)…",
-                'started_at' => now()->toIso8601String(),
-            ], now()->addHours(12));
+            TrendyolSendProgress::start($dealer->id, $total, $totalBatches);
 
             foreach ($chunks as $i => $chunk) {
                 SendDealerTrendyolBatch::dispatch(
@@ -148,15 +134,12 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
                 'dealer_id' => $dealer->id,
                 'total' => $total,
                 'batches' => $totalBatches,
+                'batch_size' => $batchSize,
             ]);
         } catch (Throwable $e) {
-            Cache::put('trendyol_send_status_'.$this->dealerId, [
-                'status' => 'error',
-                'message' => $e->getMessage(),
-                'finished_at' => now()->toIso8601String(),
-            ], now()->addHours(6));
+            TrendyolSendProgress::fail($this->dealerId, 'Gönderim başlatılamadı: '.$e->getMessage());
             Log::error('SendDealerTrendyolCatalog orchestrator failed', [
-                'dealer_id' => $this->dealerId,
+                'dealer_id' => $dealer->id,
                 'error' => $e->getMessage(),
             ]);
         }
@@ -164,10 +147,6 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
 
     public function failed(?Throwable $exception): void
     {
-        Cache::put('trendyol_send_status_'.$this->dealerId, [
-            'status' => 'error',
-            'message' => $exception?->getMessage() ?? 'Orchestrator başarısız',
-            'finished_at' => now()->toIso8601String(),
-        ], now()->addHours(6));
+        TrendyolSendProgress::fail($this->dealerId, 'Gönderim başlatılamadı: '.($exception?->getMessage() ?? 'Orchestrator başarısız'));
     }
 }

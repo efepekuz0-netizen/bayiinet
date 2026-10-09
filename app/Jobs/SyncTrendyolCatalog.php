@@ -22,7 +22,7 @@ class SyncTrendyolCatalog implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 3600;
+    public int $timeout = 840;
 
     public int $tries = 1;
 

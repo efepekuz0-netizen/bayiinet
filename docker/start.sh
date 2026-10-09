@@ -28,7 +28,11 @@ php artisan queue:prune-failed --hours=0 2>/dev/null || true
 php artisan queue:clear marketplace --force 2>/dev/null || true
 
 # Kuyruk işçileri: default (kar oranı, genel işler) + marketplace (Trendyol) + zamanlayıcı
-php artisan queue:work --queue=default,marketplace --sleep=2 --tries=1 --timeout=960 --memory=512 &
+# --tries: iş sınıfının kendi \$tries değeri her zaman önceliklidir; buradaki değer
+# yalnızca \$tries tanımlamayan işler için varsayılandır.
+# --timeout, veritabanı kuyruğunun retry_after (960 sn) değerinden KÜÇÜK olmalı;
+# aksi hâlde uzun süren işler ikinci bir işçiye yeniden düşer.
+php artisan queue:work --queue=default,marketplace --sleep=2 --tries=3 --timeout=900 --memory=512 &
 php artisan schedule:work &
 
 # --no-reload: ortam değişkenlerinin (APP_KEY, DB_*) uygulamaya iletilmesi için şart

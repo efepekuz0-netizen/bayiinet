@@ -20,7 +20,7 @@ class ApplyBulkXmlMargin implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 1800;
+    public int $timeout = 840;
 
     public int $tries = 1;
 

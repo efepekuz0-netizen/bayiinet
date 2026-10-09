@@ -237,6 +237,9 @@
                     <i class="bi bi-percent"></i> Kâr & Fiyatlama
                 </a>
                 <div class="nav-section">Sistem</div>
+                <a href="{{ route('admin.automation.index') }}" class="{{ request()->routeIs('admin.automation.*') ? 'active' : '' }}">
+                    <i class="bi bi-robot"></i> Otomasyon
+                </a>
                 <a href="{{ route('admin.logs.index') }}" class="{{ request()->routeIs('admin.logs.*') ? 'active' : '' }}">
                     <i class="bi bi-list-ul"></i> Kayıtlar
                 </a>

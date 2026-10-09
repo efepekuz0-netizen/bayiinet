@@ -185,6 +185,11 @@ class OperationsController extends Controller
 
         Cache::forget('xml_feed_catalog');
 
+        \App\Services\AdminAudit::log('pricing.update', 'Kâr & fiyatlama ayarları güncellendi.', [
+            'keys' => array_keys($data),
+            'apply_to_all' => $request->boolean('apply_to_all'),
+        ]);
+
         return back()->with('success', $msg);
     }
 
@@ -192,6 +197,7 @@ class OperationsController extends Controller
     {
         $data = $request->validate([
             'critical_stock_threshold' => 'required|integer|min:0|max:100000',
+            'profit_margin' => 'nullable|numeric|min:0|max:500',
             'xml_margin_percent' => 'nullable|numeric|min:0|max:500',
             'min_margin_percent' => 'nullable|numeric|min:0|max:500',
             'default_marketplace_margin' => 'nullable|numeric|min:0|max:500',
@@ -207,6 +213,14 @@ class OperationsController extends Controller
         }
 
         PlatformSetting::write('xml_prices_include_tax', $request->boolean('xml_prices_include_tax') ? '1' : '0');
+
+        // Platform kâr oranı boş bırakılırsa XML kâr oranıyla aynı tutulur
+        if (! array_key_exists('profit_margin', $data) || $data['profit_margin'] === null) {
+            if (array_key_exists('xml_margin_percent', $data) && $data['xml_margin_percent'] !== null) {
+                PlatformSetting::write('profit_margin', $data['xml_margin_percent']);
+            }
+        }
+
         if (array_key_exists('xml_margin_percent', $data) && $data['xml_margin_percent'] !== null) {
             \App\Jobs\ApplyBulkXmlMargin::dispatch(
                 (float) $data['xml_margin_percent'],
@@ -217,6 +231,8 @@ class OperationsController extends Controller
         }
         Cache::forget('xml_feed_catalog');
 
+        \App\Services\AdminAudit::log('settings.update', 'Panel ayarları güncellendi.', ['keys' => array_keys($data)]);
+
         return back()->with('success', 'Panel ayarları kaydedildi. Kar oranı değiştiyse ürün fiyatları arka planda güncelleniyor.');
     }
 
@@ -224,6 +240,7 @@ class OperationsController extends Controller
     {
         $settings = [
             'critical_stock_threshold' => PlatformSetting::read('critical_stock_threshold', '5'),
+            'profit_margin' => app(\App\Services\PricingService::class)->profitMargin(),
             'xml_margin_percent' => PlatformSetting::read('xml_margin_percent', '15'),
             'min_margin_percent' => PlatformSetting::read('min_margin_percent', '5'),
             'default_marketplace_margin' => PlatformSetting::read('default_marketplace_margin', '20'),
@@ -270,6 +287,8 @@ class OperationsController extends Controller
         $data['created_by'] = auth()->id();
 
         DealerAnnouncement::create($data);
+
+        \App\Services\AdminAudit::log('announcement.store', 'Bayi duyurusu yayınlandı: '.$data['title']);
 
         return back()->with('success', 'Bayi duyurusu yayınlandı.');
     }

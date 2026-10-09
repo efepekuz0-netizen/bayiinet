@@ -16,7 +16,7 @@ class DashboardController extends Controller
 {
     public function index()
     {
-        $margin = (float) PlatformSetting::read('default_profit_margin', '0');
+        $margin = app(\App\Services\PricingService::class)->profitMargin();
         $threshold = (int) PlatformSetting::read('critical_stock_threshold', '5');
 
         $from = now()->subDays(13)->startOfDay();

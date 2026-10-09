@@ -56,9 +56,16 @@ class DealerTrendyolService
     /**
      * Seçilen ürünleri bayinin Trendyol mağazasına gönderir.
      *
+     * Dönen sayımlar:
+     *  - accepted: Trendyol'un "ürün oluştur" isteğini kabul ettiği kalem
+     *  - created:  Trendyol'un oluşturduğu doğrulanan kalem
+     *  - pending:  iletildi ama sonucu henüz okunamayan kalem
+     *  - updated:  zaten Trendyol'da olan, fiyat/stoğu tazelenen kalem
+     *  - failed:   hazırlanamayan ya da reddedilen kalem
+     *
      * @param  array<int, int>  $productIds
      * @param  array<int, array<string, mixed>>  $attributes  Trendyol kategori özellikleri
-     * @return array{sent: int, failed: int, batches: array<int, string>, errors: array<int, string>}
+     * @return array{accepted: int, created: int, pending: int, updated: int, failed: int, batches: array<int, string>, errors: array<int, string>}
      */
     public function send(Dealer $dealer, array $productIds, ?int $categoryId = null, ?int $brandId = null, array $attributes = []): array
     {
@@ -84,219 +91,245 @@ class DealerTrendyolService
             }
         }
 
-        $brandCache = [];
-        $attrCache = [];
         // Form / kayıtlı fallback (zorunlu değil — XML markası öncelikli)
         $defaultBrand = $brandId && $brandId > 0
             ? $brandId
             : ($this->categoryMatcher->fallbackBrandId() ?: null);
 
-        $readyCreate = [];
-        $readyUpdate = [];
+        // Bilinmeyen markalar için genel marka (tek seferde çözülür)
+        $genericBrandId = $defaultBrand ?: $this->api->resolveGenericBrandId($connection);
+
+        // Benzersiz XML markalarını bir kez çöz (ürün başına API çağrısı yok)
+        $brandCache = $this->resolveBrandIds($connection, $products, $genericBrandId);
+
+        // 1) Gönderilecek tüm kalemleri hazırla
+        $rows = [];
         $failed = 0;
         $errors = [];
 
-        // Generic marka bir kez (ASTRALTECH gibi bilinmeyen isimler için)
-        $genericBrandId = $defaultBrand ?: $this->api->resolveGenericBrandId($connection);
-
-        // Benzersiz XML markalarını bir kez çöz
-        $uniqueBrands = $products->pluck('brand')->map(fn ($b) => trim((string) $b))->filter()->unique()->values();
-        foreach ($uniqueBrands as $bn) {
-            $ck = mb_strtolower($bn);
-            if (array_key_exists($ck, $brandCache)) {
-                continue;
-            }
-            try {
-                $found = Cache::remember(
-                    'trendyol_brand_v2_'.md5($ck),
-                    now()->addDays(14),
-                    function () use ($connection, $bn, $genericBrandId) {
-                        $id = $this->api->findBrandId($connection, $bn);
-                        // Trendyol'da yoksa generic / varsayılan
-                        return $id ?: $genericBrandId;
-                    }
-                );
-                $brandCache[$ck] = $found;
-            } catch (Throwable $e) {
-                $brandCache[$ck] = $genericBrandId;
-            }
-        }
-
         foreach ($products as $product) {
             $resolved = $this->categoryMatcher->match($product, $leaves, $categoryId && $categoryId > 0 ? $categoryId : null);
-            $productCategoryId = $resolved['id'] ?? null;
+            $productCategoryId = (int) ($resolved['id'] ?? 0);
 
-            if (! $productCategoryId) {
+            if ($productCategoryId <= 0) {
                 $failed++;
-                $errors[] = ($product->stock_code ?: $product->id).': kategori otomatik bulunamadı (başlık: '.mb_substr($product->title, 0, 40).')';
+                $errors[] = $this->label($product).': Trendyol kategorisi bulunamadı (ürün listesinden kategori numarasını elle girin)';
                 continue;
             }
 
-            // Marka: XML adı → Trendyol ID; yoksa Diğer / form varsayılan (asla bloklama)
-            $productBrandId = null;
-            $brandName = trim((string) ($product->brand ?? ''));
-            if ($brandName !== '') {
-                $cacheKey = mb_strtolower($brandName);
-                if (! empty($brandCache[$cacheKey])) {
-                    $productBrandId = (int) $brandCache[$cacheKey];
-                }
-            }
-            if (! $productBrandId) {
-                $productBrandId = $defaultBrand ?: $genericBrandId;
-            }
-            if (! $productBrandId) {
-                // Son çare masaüstü BRAND_ID
-                $productBrandId = 2613880;
-            }
+            $productBrandId = $this->brandIdFor($product, $brandCache, $defaultBrand, $genericBrandId);
 
             foreach ($this->entries($product) as $variant) {
                 $barcode = $this->barcodeFor($product, $variant);
-                $sale = $this->salePrice($product, $variant, $margin);
-                $list = max((float) ($product->list_price ?? 0), $sale);
-                $quantity = $this->quantityFor($product, $variant);
-
-                $existing = DealerTrendyolListing::query()
-                    ->where('dealer_id', $dealer->id)
-                    ->where('barcode', $barcode)
-                    ->first();
-
-                $alreadyOnTy = $existing && in_array($existing->status, ['sent', 'created'], true);
-
-                $listing = DealerTrendyolListing::query()->updateOrCreate(
-                    ['dealer_id' => $dealer->id, 'barcode' => $barcode],
-                    [
-                        'product_id' => $product->id,
-                        'product_variant_id' => $variant?->id,
-                        'sale_price' => $sale,
-                        'list_price' => $list,
-                        'quantity' => $quantity,
-                        'category_id' => $productCategoryId,
-                        'brand_id' => $productBrandId,
-                        'status' => $alreadyOnTy ? $existing->status : 'pending',
-                        'error' => null,
-                    ],
-                );
-
-                // Mevcut Trendyol ürünü → sadece fiyat/stok güncelle (masaüstü mantığı)
-                if ($alreadyOnTy) {
-                    $readyUpdate[] = [
-                        'listing' => $listing,
-                        'item' => [
-                            'barcode' => $barcode,
-                            'quantity' => $quantity,
-                            'salePrice' => $sale,
-                            'listPrice' => $list,
-                        ],
-                    ];
+                if ($barcode === '') {
+                    $failed++;
+                    $errors[] = $this->label($product).': barkod ve stok kodu boş, Trendyol barkod üretilemedi';
                     continue;
                 }
 
-                try {
-                    $productAttrs = $attributes !== []
-                        ? $attributes
-                        : $this->attributesForCategory(
-                            $connection,
-                            (int) $productCategoryId,
-                            $attrCache,
-                            (string) ($product->title ?? ''),
-                            (string) ($product->description ?? ''),
-                            (string) ($product->category_path ?? $product->category ?? ''),
-                        );
-                    if ($productAttrs === null) {
-                        $failed++;
-                        $errors[] = ($product->stock_code ?: $product->id).': zorunlu kategori özellikleri doldurulamadı (kat: '.$productCategoryId.')';
-                        continue;
-                    }
-                    $item = TrendyolProductPayload::item([
+                $sale = $this->salePrice($product, $variant, $margin);
+                if ($sale <= 0) {
+                    $failed++;
+                    $errors[] = $this->label($product).': satış fiyatı hesaplanamadı (maliyet 0 veya fiyat sınırı dışında)';
+                    continue;
+                }
+
+                $rows[] = [
+                    'product' => $product,
+                    'variant' => $variant,
+                    'barcode' => $barcode,
+                    'sale' => $sale,
+                    'list' => max((float) ($product->list_price ?? 0), $sale),
+                    'quantity' => $this->quantityFor($product, $variant),
+                    'category_id' => $productCategoryId,
+                    'brand_id' => $productBrandId,
+                ];
+            }
+        }
+
+        // 2) Mevcut listingleri TEK sorguda çek (ürün başına sorgu yapılmaz)
+        $barcodes = array_values(array_unique(array_column($rows, 'barcode')));
+        $existingListings = collect();
+        foreach (array_chunk($barcodes, 500) as $barcodeChunk) {
+            if ($barcodeChunk === []) {
+                continue;
+            }
+            $existingListings = $existingListings->merge(
+                DealerTrendyolListing::query()
+                    ->where('dealer_id', $dealer->id)
+                    ->whereIn('barcode', $barcodeChunk)
+                    ->get()
+                    ->keyBy(fn (DealerTrendyolListing $listing): string => (string) $listing->barcode)
+            );
+        }
+
+        // 3) Kalemleri Trendyol'a gönderilecek / güncellenecek olarak ayır
+        $readyCreate = [];
+        $readyUpdate = [];
+        $attrCache = [];
+
+        foreach ($rows as $row) {
+            $product = $row['product'];
+            $variant = $row['variant'];
+            $barcode = $row['barcode'];
+
+            $existing = $existingListings->get($barcode);
+            $alreadyOnTy = $existing !== null && in_array($existing->status, ['sent', 'created'], true);
+
+            $listingData = [
+                'product_id' => $product->id,
+                'product_variant_id' => $variant?->id,
+                'sale_price' => $row['sale'],
+                'list_price' => $row['list'],
+                'quantity' => $row['quantity'],
+                'category_id' => $row['category_id'],
+                'brand_id' => $row['brand_id'],
+                'status' => $alreadyOnTy ? $existing->status : 'pending',
+                'error' => null,
+            ];
+
+            if ($existing === null) {
+                $listing = DealerTrendyolListing::create(
+                    ['dealer_id' => $dealer->id, 'barcode' => $barcode] + $listingData
+                );
+                $existingListings->put($barcode, $listing);
+            } else {
+                $existing->update($listingData);
+                $listing = $existing;
+            }
+
+            // Trendyol'da zaten var → yalnızca fiyat/stok güncelle
+            if ($alreadyOnTy) {
+                $readyUpdate[] = [
+                    'listing' => $listing,
+                    'item' => [
+                        'barcode' => $barcode,
+                        'quantity' => $row['quantity'],
+                        'salePrice' => $row['sale'],
+                        'listPrice' => $row['list'],
+                    ],
+                ];
+                continue;
+            }
+
+            try {
+                $productAttrs = $attributes !== []
+                    ? $attributes
+                    : $this->attributesForCategory(
+                        $connection,
+                        $row['category_id'],
+                        $attrCache,
+                        (string) ($product->title ?? ''),
+                        (string) ($product->description ?? ''),
+                        (string) ($product->category_path ?? ''),
+                    );
+
+                if ($productAttrs === null) {
+                    $message = 'Zorunlu kategori özellikleri doldurulamadı (kategori: '.$row['category_id'].')';
+                    $listing->update(['status' => 'failed', 'error' => $message]);
+                    $failed++;
+                    $errors[] = $this->label($product).': '.$message;
+                    continue;
+                }
+
+                $readyCreate[] = [
+                    'listing' => $listing,
+                    'item' => TrendyolProductPayload::item([
                         'barcode' => $barcode,
                         'stock_code' => $product->stock_code,
                         'title' => $this->titleFor($product, $variant),
                         'description' => $product->description,
                         'images' => (array) ($product->images ?? []),
-                        'quantity' => $quantity,
-                        'sale_price' => $sale,
-                        'list_price' => $list,
+                        'quantity' => $row['quantity'],
+                        'sale_price' => $row['sale'],
+                        'list_price' => $row['list'],
                         'vat_rate' => $product->tax_rate ?: 20,
                         'desi' => $product->desi,
-                        'category_id' => $productCategoryId,
-                        'brand_id' => $productBrandId,
+                        'category_id' => $row['category_id'],
+                        'brand_id' => $row['brand_id'],
                         'attributes' => $productAttrs,
-                    ]);
-                } catch (InvalidArgumentException $e) {
-                    $listing->update(['status' => 'failed', 'error' => $e->getMessage()]);
-                    $failed++;
-                    $errors[] = $product->stock_code.': '.$e->getMessage();
-
-                    continue;
-                }
-
-                $readyCreate[] = ['listing' => $listing, 'item' => $item];
+                    ]),
+                ];
+            } catch (InvalidArgumentException $e) {
+                $listing->update(['status' => 'failed', 'error' => mb_substr($e->getMessage(), 0, 1000)]);
+                $failed++;
+                $errors[] = $this->label($product).': '.$e->getMessage();
             }
         }
 
-        $sent = 0;
+        // 4) Yeni ürünleri oluştur
+        $accepted = 0;
+        $created = 0;
+        $rejected = 0;
         $batches = [];
 
-        // Yeni ürün oluştur + batch sonucunu doğrula (masaüstü gibi)
         foreach (array_chunk($readyCreate, self::CHUNK_SIZE) as $chunk) {
             $items = array_column($chunk, 'item');
-            $listingIds = array_map(fn (array $row) => $row['listing']->id, $chunk);
+            $listingIds = array_map(fn (array $row): int => $row['listing']->id, $chunk);
             $barcodeToListing = [];
             foreach ($chunk as $row) {
-                $bc = (string) ($row['item']['barcode'] ?? $row['listing']->barcode);
-                $barcodeToListing[$bc] = $row['listing']->id;
+                $barcodeToListing[(string) ($row['item']['barcode'] ?? $row['listing']->barcode)] = $row['listing']->id;
             }
 
             try {
                 $response = $this->api->createProducts($connection, $items);
                 $batchId = (string) ($response['batchRequestId'] ?? '');
 
-                DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
-                    'status' => 'sent',
-                    'batch_request_id' => $batchId !== '' ? $batchId : null,
-                    'error' => null,
-                    'sent_at' => now(),
-                ]);
-
-                if ($batchId !== '') {
-                    $batches[] = $batchId;
-                    // Batch sonucu gelene kadar birkaç kez dene (Trendyol genelde 2–15 sn)
-                    $verify = $this->waitAndApplyBatchResult($dealer, $connection, $batchId, $barcodeToListing);
-                    $sent += $verify['created'];
-                    $failed += $verify['failed'];
-                    $errors = array_merge($errors, $verify['errors']);
-                    if ($verify['pending']) {
-                        // Arka planda tekrar kontrol
-                        \App\Jobs\VerifyTrendyolBatch::dispatch($dealer->id, $batchId)
-                            ->delay(now()->addSeconds(20));
-                    }
-                } else {
-                    // batchRequestId yoksa gerçekten kabul edilmemiş say
+                if ($batchId === '') {
+                    // batchRequestId yoksa gerçekten kabul edilmemiş say (batch'e bağlı değil)
                     $failed += count($chunk);
                     $errors[] = 'Trendyol batchRequestId dönmedi — istek reddedilmiş olabilir.';
                     DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
                         'status' => 'failed',
                         'error' => 'batchRequestId yok',
                     ]);
+                    continue;
+                }
+
+                DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
+                    'status' => 'sent',
+                    'batch_request_id' => $batchId,
+                    'error' => null,
+                    'sent_at' => now(),
+                ]);
+
+                $accepted += count($chunk);
+                $batches[] = $batchId;
+                TrendyolSendProgress::registerBatch($dealer->id, $batchId, count($chunk));
+
+                // Batch sonucu gelene kadar kısa bir süre bekle; gelmezse
+                // arka planda VerifyTrendyolBatch devam eder (uzun süre bloklama yok).
+                $verify = $this->waitAndApplyBatchResult($dealer, $connection, $batchId, $barcodeToListing);
+                $created += $verify['created'];
+                $rejected += $verify['failed'];
+                $errors = array_merge($errors, $verify['errors']);
+
+                if ($verify['pending']) {
+                    \App\Jobs\VerifyTrendyolBatch::dispatch($dealer->id, $batchId)
+                        ->delay(now()->addSeconds(20));
+                } else {
+                    // Sonuç tamamsa sayaçları hemen kesinleştir
+                    TrendyolSendProgress::resolveBatch($dealer->id, $batchId);
                 }
             } catch (Throwable $e) {
                 DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
                     'status' => 'failed',
                     'error' => mb_substr($e->getMessage(), 0, 1000),
                 ]);
-                $failed += count($chunk);
+                $rejected += count($chunk);
                 $errors[] = $e->getMessage();
                 $dealer->update(['trendyol_last_error' => mb_substr($e->getMessage(), 0, 1000)]);
             }
         }
 
-        // Mevcut ürün fiyat/stok güncelle
+        // 5) Mevcut ürünlerin fiyat/stoğunu güncelle
+        $updated = 0;
         foreach (array_chunk($readyUpdate, 1000) as $chunk) {
             $items = array_column($chunk, 'item');
             try {
                 $response = $this->api->updatePriceAndInventory($connection, $items);
                 $batchId = (string) ($response['batchRequestId'] ?? '');
-                $sent += count($chunk);
+                $updated += count($chunk);
                 if ($batchId !== '') {
                     $batches[] = $batchId;
                 }
@@ -306,7 +339,86 @@ class DealerTrendyolService
             }
         }
 
-        return ['sent' => $sent, 'failed' => $failed, 'batches' => $batches, 'errors' => array_values(array_unique($errors))];
+        // Ürünlerden öğrenilen kategori eşleşmelerini topluca kaydet
+        $this->categoryMatcher->flush();
+
+        return [
+            // Trendyol'a iletilen ama sonucu henüz okunamayan kalem
+            'pending' => max(0, $accepted - $created - $rejected),
+            // Trendyol'un oluşturduğu doğrulanan kalem
+            'created' => $created,
+            // Doğrudan başarılı: zaten Trendyol'da olan, fiyat/stoğu tazelenen kalem
+            'updated' => $updated,
+            // Doğrudan hatalı: hazırlanamayan ya da Trendyol'a hiç iletilemeyen kalem
+            'failed' => $failed,
+            // Batch sonucunda reddedilen kalem (sayaçlar batch üzerinden tutulur)
+            'rejected' => $rejected,
+            'batches' => $batches,
+            'errors' => array_values(array_unique(array_filter($errors, fn ($e): bool => is_string($e) && $e !== ''))),
+        ];
+    }
+
+    /**
+     * XML'deki marka adlarını Trendyol marka numaralarına çevirir (tek seferde).
+     *
+     * @param  iterable<Product>  $products
+     * @return array<string, int|null>
+     */
+    private function resolveBrandIds(MarketplaceConnection $connection, iterable $products, ?int $genericBrandId): array
+    {
+        $names = [];
+        foreach ($products as $product) {
+            $name = trim((string) ($product->brand ?? ''));
+            if ($name !== '') {
+                $names[mb_strtolower($name)] = $name;
+            }
+        }
+
+        $cache = [];
+        foreach ($names as $lower => $name) {
+            try {
+                $cache[$lower] = Cache::remember(
+                    'trendyol_brand_v2_'.md5($lower),
+                    now()->addDays(14),
+                    function () use ($connection, $name, $genericBrandId) {
+                        return $this->api->findBrandId($connection, $name) ?: $genericBrandId;
+                    }
+                );
+            } catch (Throwable $e) {
+                $cache[$lower] = $genericBrandId;
+            }
+        }
+
+        return $cache;
+    }
+
+    /** Ürün için kullanılacak Trendyol marka numarası. */
+    private function brandIdFor(Product $product, array $brandCache, ?int $defaultBrand, ?int $genericBrandId): int
+    {
+        $brandName = trim((string) ($product->brand ?? ''));
+        if ($brandName !== '') {
+            $id = (int) ($brandCache[mb_strtolower($brandName)] ?? 0);
+            if ($id > 0) {
+                return $id;
+            }
+        }
+
+        if ($defaultBrand) {
+            return (int) $defaultBrand;
+        }
+
+        if ($genericBrandId) {
+            return (int) $genericBrandId;
+        }
+
+        // Son çare: yapılandırmadaki genel marka numarası
+        return (int) config('bayiinet.trendyol.fallback_brand_id');
+    }
+
+    /** Hata mesajlarında ürünü tanımlayan kısa etiket. */
+    private function label(Product $product): string
+    {
+        return (string) ($product->stock_code ?: ('#'.$product->id));
     }
 
     /**
@@ -351,6 +463,8 @@ class DealerTrendyolService
                 $created += $v['created'];
                 $failed += $v['failed'];
                 $errors = array_merge($errors, $v['errors']);
+                // Gönderim ekranındaki sayaçlar da kesinleşsin
+                TrendyolSendProgress::resolveBatch($dealer->id, (string) $batchId);
             } catch (Throwable $e) {
                 $pending++;
                 if (count($errors) < 10) {
@@ -406,6 +520,9 @@ class DealerTrendyolService
                 $failed++;
             }
         }
+
+        // Gönderim ekranındaki sayaçlar da kesinleşsin
+        TrendyolSendProgress::resolveBatch($dealer->id, $batchRequestId);
 
         return [
             'status' => (string) ($result['status'] ?? 'BİLİNMİYOR'),
@@ -543,7 +660,11 @@ class DealerTrendyolService
                 );
                 $cache[$categoryId] = is_array($data['categoryAttributes'] ?? null) ? $data['categoryAttributes'] : [];
             } catch (Throwable $e) {
-                $cache[$categoryId] = null;
+                // Kategori özellikleri okunamadıysa tüm gönderimi durdurmak yerine
+                // ürünü özelliksiz gönderiyoruz: Trendyol zorunlu özellik eksikse
+                // kalem bazında gerekçe döner, gerçek hata görülebilir olur.
+                report($e);
+                $cache[$categoryId] = [];
             }
         }
         $rows = $cache[$categoryId];
@@ -823,16 +944,15 @@ class DealerTrendyolService
         MarketplaceConnection $connection,
         string $batchId,
         array $barcodeToListing,
-        int $attempts = 8,
-        int $sleepMs = 3000,
     ): array {
+        // Trendyol sonucu genelde 2-15 sn içinde hazır olur. Uzun süre bloklamak
+        // yerine kısa bir süre bekleyip kalanını VerifyTrendyolBatch'e bırakıyoruz.
+        $deadline = microtime(true) + max(3, (int) config('bayiinet.trendyol.batch_wait_seconds', 9));
         $lastError = '';
-        for ($i = 0; $i < $attempts; $i++) {
-            if ($i > 0) {
-                usleep($sleepMs * 1000);
-            } else {
-                usleep(1200000); // ilk bekleme ~1.2s
-            }
+
+        for ($i = 0; $i < 6; $i++) {
+            usleep($i === 0 ? 1200000 : 3000000); // ilk bekleme ~1.2s, sonra 3'er sn
+
             try {
                 $result = $this->applyBatchResult($dealer, $connection, $batchId, $barcodeToListing);
                 $result['pending'] = false;
@@ -840,6 +960,10 @@ class DealerTrendyolService
                 return $result;
             } catch (Throwable $e) {
                 $lastError = $e->getMessage();
+            }
+
+            if (microtime(true) >= $deadline) {
+                break;
             }
         }
 
@@ -992,13 +1116,30 @@ class DealerTrendyolService
 
     private function barcodeFor(Product $product, ?ProductVariant $variant): string
     {
+        // Trendyol barkodda en fazla 40 karaktere izin verir; kolon da 64 karakter.
+        $limit = 40;
+
         if ($variant === null) {
-            return TrendyolProductPayload::cleanBarcode((string) ($product->barcode ?: $product->stock_code));
+            return mb_substr(
+                TrendyolProductPayload::cleanBarcode((string) ($product->barcode ?: $product->stock_code)),
+                0,
+                $limit
+            );
         }
 
         $own = TrendyolProductPayload::cleanBarcode((string) $variant->barcode);
+        if ($own !== '') {
+            return mb_substr($own, 0, $limit);
+        }
 
-        return $own !== '' ? $own : TrendyolProductPayload::cleanBarcode($product->stock_code.'-'.($variant->sku ?: $variant->id));
+        $base = TrendyolProductPayload::cleanBarcode((string) ($product->barcode ?: $product->stock_code));
+        if ($base === '') {
+            return '';
+        }
+
+        $suffix = '-'.TrendyolProductPayload::cleanBarcode((string) ($variant->sku ?: $variant->id));
+
+        return mb_substr($base, 0, max(1, $limit - mb_strlen($suffix))).$suffix;
     }
 
     private function titleFor(Product $product, ?ProductVariant $variant): string

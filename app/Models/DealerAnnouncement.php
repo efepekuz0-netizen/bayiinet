@@ -9,10 +9,6 @@ class DealerAnnouncement extends Model
 {
     protected $fillable = [
         'title',
-        'content',
-        'priority',
-        'active_from',
-        'active_until',
         'created_by',
         'body',
         'is_active',
@@ -21,9 +17,6 @@ class DealerAnnouncement extends Model
     ];
 
     protected $casts = [
-        'priority' => 'integer',
-        'active_from' => 'datetime',
-        'active_until' => 'datetime',
         'is_active' => 'boolean',
         'starts_at' => 'datetime',
         'ends_at' => 'datetime',

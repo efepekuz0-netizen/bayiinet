@@ -25,7 +25,7 @@
                 </tbody>
                 <tfoot>
                     <tr><td colspan="3" class="text-end fw-semibold">Toplam</td>
-                    <td class="fw-bold">{{ number_format($order->total ?? $order->total_amount, 2) }} ₺</td></tr>
+                    <td class="fw-bold">{{ number_format((float) $order->total, 2) }} ₺</td></tr>
                 </tfoot>
             </table>
         </div>

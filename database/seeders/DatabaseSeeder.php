@@ -123,7 +123,7 @@ class DatabaseSeeder extends Seeder
         }
 
         PlatformSetting::write('critical_stock_threshold', '5');
-        PlatformSetting::write('default_margin_percent', '25');
+        PlatformSetting::write('profit_margin', '25');
         PlatformSetting::write('company_name', 'Bayiinet');
 
         $this->command->info('Seed tamamlandi!');

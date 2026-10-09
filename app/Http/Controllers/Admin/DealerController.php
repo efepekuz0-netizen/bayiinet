@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\BalanceTransaction;
 use App\Models\Dealer;
+use App\Services\AdminAudit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -66,6 +67,8 @@ class DealerController extends Controller
 
             Cache::forget('xml_feed_dealer_'.$dealer->id);
             Cache::forget('xml_feed_'.$dealer->id);
+
+            AdminAudit::log('dealer.approve', $dealer->company_name.' onaylandı.', ['dealer_id' => $dealer->id]);
         } catch (\Throwable $e) {
             report($e);
 
@@ -85,6 +88,8 @@ class DealerController extends Controller
             $dealer->update($payload);
             Cache::forget('xml_feed_dealer_'.$dealer->id);
             Cache::forget('xml_feed_'.$dealer->id);
+
+            AdminAudit::log('dealer.suspend', $dealer->company_name.' askıya alındı.', ['dealer_id' => $dealer->id]);
         } catch (\Throwable $e) {
             report($e);
 
@@ -116,6 +121,11 @@ class DealerController extends Controller
                 'created_by' => auth()->id(),
             ]);
         });
+
+        AdminAudit::log('dealer.balance', $dealer->company_name.' bakiyesine '.number_format((float) $data['amount'], 2).' TL eklendi.', [
+            'dealer_id' => $dealer->id,
+            'amount' => $data['amount'],
+        ]);
 
         return back()->with('success', 'Bakiye eklendi.');
     }
@@ -168,7 +178,11 @@ class DealerController extends Controller
             $credentials['api_secret'] = $data['trendyol_api_secret'];
             $keyChanged = true;
         }
-        if ($keyChanged || array_key_exists('trendyol_seller_id', $data)) {
+        $sellerChanged = array_key_exists('trendyol_seller_id', $data)
+            && (string) ($data['trendyol_seller_id'] ?? '') !== (string) ($dealer->trendyol_seller_id ?? '');
+
+        // Hata mesajı yalnızca kimlik bilgisi gerçekten değiştiğinde temizlenir
+        if ($keyChanged || $sellerChanged) {
             $update['trendyol_credentials'] = $credentials;
             $update['trendyol_last_error'] = null;
         }
@@ -182,6 +196,12 @@ class DealerController extends Controller
         }
 
         $dealer->update($update);
+
+        AdminAudit::log('dealer.update', $dealer->company_name.' bayi ayarları güncellendi.', [
+            'dealer_id' => $dealer->id,
+            'fields' => array_keys($update),
+            'trendyol_credentials_changed' => $keyChanged || $sellerChanged,
+        ]);
 
         // Kar veya token değiştiyse feed cache temizle
         Cache::forget('xml_feed_dealer_'.$dealer->id);

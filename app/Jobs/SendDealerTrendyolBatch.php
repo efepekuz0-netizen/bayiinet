@@ -4,12 +4,12 @@ namespace App\Jobs;
 
 use App\Models\Dealer;
 use App\Services\DealerTrendyolService;
+use App\Services\TrendyolSendProgress;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -20,7 +20,7 @@ class SendDealerTrendyolBatch implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 180;
+    public int $timeout = 300;
 
     public int $tries = 1;
 
@@ -47,21 +47,29 @@ class SendDealerTrendyolBatch implements ShouldQueue
 
     public function handle(DealerTrendyolService $trendyol): void
     {
-        $key = 'trendyol_send_status_'.$this->dealerId;
-        $status = Cache::get($key, []);
-
-        if (in_array($status['status'] ?? '', ['cancelled', 'stopped'], true)) {
+        // "Gönderimi durdur"a basıldıysa kuyruktaki işler kendini atlar.
+        // (Eskiden tüm kuyruk siliniyordu; diğer bayilerin işleri de gidiyordu.)
+        if (TrendyolSendProgress::isCancelled($this->dealerId)) {
             return;
         }
+
+        $processed = count($this->productIds);
 
         $dealer = Dealer::query()->find($this->dealerId);
         if (! $dealer || ! $dealer->hasTrendyolCredentials()) {
-            $this->bumpStatus($key, 0, count($this->productIds), ['Bayi/credentials yok']);
+            TrendyolSendProgress::addBatch(
+                $this->dealerId,
+                $processed,
+                0,
+                $processed,
+                [],
+                ['Bayi bulunamadı veya Trendyol API bilgileri eksik.'],
+            );
 
             return;
         }
 
-        $sent = 0;
+        $updated = 0;
         $failed = 0;
         $errors = [];
         $batches = [];
@@ -74,13 +82,16 @@ class SendDealerTrendyolBatch implements ShouldQueue
                 $this->brandId,
                 $this->attributes,
             );
-            $sent = (int) ($result['sent'] ?? 0);
+
+            // 'created' ve 'pending' sayaçları batch bazlı tutulur
+            // (SendDealerTrendyolCatalog registerBatch ile kaydeder),
+            // burada yalnızca batch'e bağlı olmayan sonuçlar aktarılır.
+            $updated = (int) ($result['updated'] ?? 0);
             $failed = (int) ($result['failed'] ?? 0);
-            $errors = array_slice($result['errors'] ?? [], 0, 8);
-            $batches = $result['batches'] ?? [];
+            $errors = array_slice((array) ($result['errors'] ?? []), 0, 8);
+            $batches = array_values((array) ($result['batches'] ?? []));
         } catch (Throwable $e) {
-            $sent = 0;
-            $failed = count($this->productIds);
+            $failed = $processed;
             $errors = [mb_substr($e->getMessage(), 0, 200)];
             Log::warning('SendDealerTrendyolBatch exception', [
                 'dealer_id' => $this->dealerId,
@@ -90,59 +101,18 @@ class SendDealerTrendyolBatch implements ShouldQueue
         }
 
         // Asla exception fırlatma — "attempted too many times" olmasın
-        $this->bumpStatus($key, $sent, $failed, $errors, $batches);
+        TrendyolSendProgress::addBatch($this->dealerId, $processed, $updated, $failed, $batches, $errors);
     }
 
     public function failed(?Throwable $exception): void
     {
-        $this->bumpStatus(
-            'trendyol_send_status_'.$this->dealerId,
+        TrendyolSendProgress::addBatch(
+            $this->dealerId,
+            count($this->productIds),
             0,
             count($this->productIds),
-            [mb_substr($exception?->getMessage() ?? 'batch failed', 0, 200)]
+            [],
+            [mb_substr($exception?->getMessage() ?? 'batch failed', 0, 200)],
         );
-    }
-
-    /** @param  list<string>  $errors */
-    private function bumpStatus(string $key, int $sent, int $failed, array $errors = [], array $batches = []): void
-    {
-        try {
-            $status = Cache::get($key, []);
-            if (in_array($status['status'] ?? '', ['cancelled', 'stopped'], true)) {
-                return;
-            }
-
-            $status['sent'] = (int) ($status['sent'] ?? 0) + $sent;
-            $status['failed'] = (int) ($status['failed'] ?? 0) + $failed;
-            $status['processed'] = (int) ($status['processed'] ?? 0) + count($this->productIds);
-            $status['batches_done'] = (int) ($status['batches_done'] ?? 0) + 1;
-            $status['total_batches'] = (int) ($status['total_batches'] ?? $this->totalBatches);
-            $status['total'] = (int) ($status['total'] ?? 0);
-            $status['errors'] = array_slice(array_values(array_unique(array_merge(
-                $status['errors'] ?? [],
-                $errors
-            ))), 0, 20);
-            $status['batch_ids'] = array_slice(array_values(array_unique(array_merge(
-                $status['batch_ids'] ?? [],
-                $batches
-            ))), -30);
-            $status['updated_at'] = now()->toIso8601String();
-
-            $processed = (int) $status['processed'];
-            $total = (int) $status['total'];
-            $status['message'] = "{$processed} / {$total} işlendi · gönderilen: {$status['sent']} · hatalı: {$status['failed']}";
-            $status['status'] = 'running';
-
-            $done = (int) ($status['batches_done'] ?? 0) >= (int) ($status['total_batches'] ?? $this->totalBatches);
-            if ($done || ($total > 0 && $processed >= $total)) {
-                $status['status'] = 'done';
-                $status['message'] = "Bitti: {$status['sent']} gönderildi, {$status['failed']} hatalı / {$total}";
-                $status['finished_at'] = now()->toIso8601String();
-            }
-
-            Cache::put($key, $status, now()->addHours(12));
-        } catch (Throwable $e) {
-            Log::warning('bumpStatus failed', ['error' => $e->getMessage()]);
-        }
     }
 }

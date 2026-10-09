@@ -93,8 +93,19 @@ class HomeController extends Controller
                 'line' => $e->getLine(),
             ]);
 
-            // Boş katalog ile yine de sayfa açılsın
-            $products = Product::query()->whereRaw('1=0')->paginate(24);
+            // Boş katalog ile yine de sayfa açılsın.
+            // Veritabanına erişilemiyorsa (en olası 500 sebebi) tekrar
+            // sorgu atmıyoruz: sayfalayıcıyı tamamen bellekte kuruyoruz.
+            $products = new \Illuminate\Pagination\LengthAwarePaginator(
+                [],
+                0,
+                24,
+                1,
+                [
+                    'path' => $request->url(),
+                    'query' => $request->query(),
+                ]
+            );
             $categories = collect();
             $featured = collect();
 
@@ -128,16 +139,26 @@ class HomeController extends Controller
         return view('product-detail', compact('product', 'related'));
     }
 
+    /**
+     * Kolon varlığını istek içinde bir kez, sunucu genelinde ise 1 saat önbelleğe alır.
+     * (Eskiden her çağrıda önbellek sorgusu + şema sorgusu yapılıyordu.)
+     */
     private function hasProductColumn(string $column): bool
     {
+        static $memo = [];
+
+        if (array_key_exists($column, $memo)) {
+            return $memo[$column];
+        }
+
         try {
-            return Cache::remember(
+            return $memo[$column] = (bool) Cache::remember(
                 'schema_products_has_'.$column,
                 3600,
                 fn () => Schema::hasColumn('products', $column)
             );
         } catch (Throwable) {
-            return false;
+            return $memo[$column] = false;
         }
     }
 }

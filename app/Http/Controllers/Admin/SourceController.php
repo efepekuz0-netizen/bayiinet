@@ -103,32 +103,25 @@ class SourceController extends Controller
             throw new \RuntimeException('XML dosyası güvenli depolama alanına kaydedilemedi.');
         }
 
-        $source->update(['file_path' => $path]);
+        $source->update(['file_path' => $path, 'last_error' => null]);
 
-        $import = $importService->importFromFile($source, Storage::disk('local')->path($path), auth()->id());
-
-        if ($import->status === 'completed') {
-            return redirect()->route('admin.sources.index')
-                ->with('success', "Import tamamlandı: {$import->created_count} yeni, {$import->updated_count} güncellendi.");
-        }
+        // Büyük XML'ler (binlerce ürün) HTTP isteğini zaman aşımına düşürdüğü
+        // için içe aktarma arka planda çalışır.
+        \App\Jobs\ImportSourceJob::dispatch($source->id, auth()->id(), false);
 
         return redirect()->route('admin.sources.index')
-            ->with('error', 'Import başarısız: '.($import->log ?? 'Bilinmeyen hata'));
+            ->with('success', 'XML yüklendi, içe aktarma arka planda başlatıldı. Sonuçlar «İçe Aktarma Geçmişi» bölümüne yazılacak.');
     }
 
-    public function refresh(Source $source, XmlImportService $importService)
+    public function refresh(Source $source)
     {
         abort_unless($source->type === 'url', 404);
 
-        $import = $importService->importFromUrl($source, auth()->id());
-
-        if ($import->status === 'completed') {
-            return redirect()->route('admin.sources.index')
-                ->with('success', "XML güncellendi: {$import->created_count} yeni, {$import->updated_count} güncellendi.");
-        }
+        // Büyük kaynaklarda istek zaman aşımına düşmemek için arka planda çalışır.
+        \App\Jobs\ImportSourceJob::dispatch($source->id, auth()->id(), false);
 
         return redirect()->route('admin.sources.index')
-            ->with('error', 'XML güncellenemedi: '.($import->log ?? 'Bilinmeyen hata'));
+            ->with('success', "«{$source->name}» kaynağı için XML yenileme arka planda başlatıldı. Sonuç «İçe Aktarma Geçmişi» bölümüne yazılacak.");
     }
 
     public function destroy(Source $source)

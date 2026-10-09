@@ -30,7 +30,7 @@ class ProductController extends Controller
 
         $products = $query->paginate(24)->withQueryString();
         $dealer = auth()->user()->dealer;
-        $profitMargin = (float) PlatformSetting::read('default_profit_margin', '0');
+        $profitMargin = app(\App\Services\PricingService::class)->profitMargin();
 
         return view('dealer.products.index', compact('products', 'dealer', 'profitMargin'));
     }

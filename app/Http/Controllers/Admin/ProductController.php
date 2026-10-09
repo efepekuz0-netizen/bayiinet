@@ -58,6 +58,7 @@ class ProductController extends Controller
         $data['is_featured'] = $request->boolean('is_featured');
         $data['show_on_homepage'] = $request->boolean('show_on_homepage');
 
+        $original = $product->only(['cost_price', 'xml_margin_percent', 'min_margin_percent', 'stock', 'is_active']);
         $product->fill($data);
 
         if (isset($data['cost_price']) || isset($data['xml_margin_percent'])) {
@@ -66,53 +67,51 @@ class ProductController extends Controller
             $product->save();
         }
 
+        \App\Services\AdminAudit::log('product.update', $product->title.' ürünü güncellendi.', [
+            'product_id' => $product->id,
+            'before' => $original,
+            'after' => $product->only(['cost_price', 'xml_margin_percent', 'min_margin_percent', 'stock', 'is_active']),
+        ]);
+
         return redirect()->route('admin.products.index')->with('success', 'Ürün güncellendi.');
     }
 
-    /** Tüm aktif kaynaklardan ürünleri yeniden çek */
-    public function pullAll(XmlImportService $importService)
+    /** Tüm aktif kaynaklardan ürünleri yeniden çek (arka planda) */
+    public function pullAll()
     {
         $sources = Source::where('is_active', true)->get();
-        $totalCreated = 0;
-        $totalUpdated = 0;
+        $queued = 0;
         $errors = [];
 
         foreach ($sources as $source) {
             try {
-                if ($source->type === 'url' && $source->url) {
-                    $import = $importService->importFromUrl($source, auth()->id());
-                } elseif ($source->file_path) {
+                if (! (($source->type === 'url' && $source->url) || $source->file_path)) {
+                    continue;
+                }
+                if ($source->type === 'file' && $source->file_path) {
                     $path = \Storage::disk('local')->path($source->file_path);
-                    if (!file_exists($path)) {
-                        $path = storage_path('app/'.$source->file_path);
-                    }
-                    if (file_exists($path)) {
-                        $import = $importService->importFromFile($source, $path, auth()->id());
-                    } else {
+                    if (!file_exists($path) && !file_exists(storage_path('app/'.$source->file_path))) {
                         $errors[] = $source->name.': dosya bulunamadı';
                         continue;
                     }
-                } else {
-                    continue;
                 }
-                $totalCreated += $import->created_count ?? 0;
-                $totalUpdated += $import->updated_count ?? 0;
+                // İçe aktarma kuyrukta çalışır: istek zaman aşımına düşmez.
+                \App\Jobs\ImportSourceJob::dispatch($source->id, auth()->id(), false);
+                $queued++;
             } catch (\Throwable $e) {
                 $errors[] = $source->name.': '.$e->getMessage();
             }
         }
 
-        // Fiyatları arka planda yeniden uygula
-        \App\Jobs\ApplyBulkXmlMargin::dispatch(
-            app(PricingService::class)->defaultXmlMargin(),
-            false,
-            null,
-            auth()->id()
-        );
+        // Not: fiyatlar içe aktarma sırasında, her kaynağın kendi kâr oranıyla
+        // toplu olarak hesaplanıyor. Burada ayrıca genel bir kâr oranı
+        // uygulanmıyor (kaynağa özel oranları eziyordu).
 
         \Cache::forget('xml_feed_catalog');
+        \Cache::forget('home_main_categories_v2');
+        \Cache::forget('admin_dash_stats_v2');
 
-        $msg = "Çekim tamam: {$totalCreated} yeni, {$totalUpdated} güncellendi. Fiyatlar arka planda güncelleniyor.";
+        $msg = "{$queued} kaynak için XML çekimi arka planda başlatıldı. Ürünler ve fiyatlar tamamlandıkça güncellenecek — «İçe Aktarma Geçmişi» bölümünden takip edebilirsiniz.";
         if ($errors) {
             $msg .= ' Hatalar: '.implode('; ', $errors);
             return back()->with('error', $msg);

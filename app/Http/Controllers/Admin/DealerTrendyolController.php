@@ -9,6 +9,8 @@ use App\Jobs\DeleteDealerTrendyolProducts;
 use App\Jobs\SendDealerTrendyolCatalog;
 use App\Models\Source;
 use App\Services\DealerTrendyolService;
+use App\Services\AdminAudit;
+use App\Services\TrendyolSendProgress;
 use Illuminate\Support\Facades\Cache;
 use App\Services\TrendyolCategoryMatcher;
 use Illuminate\Http\RedirectResponse;
@@ -64,7 +66,7 @@ class DealerTrendyolController extends Controller
         $defaultCategoryId = (int) ($catMap['fallback_id'] ?? 0) ?: old('category_id');
         $defaultBrandId = (int) ($catMap['fallback_brand_id'] ?? 0) ?: old('brand_id');
 
-        $sendStatus = Cache::get('trendyol_send_status_'.$dealer->id);
+        $sendStatus = TrendyolSendProgress::get($dealer->id);
         $deleteStatus = Cache::get('trendyol_delete_status_'.$dealer->id);
         $sources = Source::query()->orderBy('name')->get(['id', 'name']);
 
@@ -172,24 +174,21 @@ class DealerTrendyolController extends Controller
             return $this->back($dealer)->with('error', 'Önce Trendyol API bilgilerini kaydedin.');
         }
 
-        $existing = Cache::get('trendyol_send_status_'.$dealer->id);
-        if (is_array($existing) && in_array($existing['status'] ?? '', ['queued', 'running'], true)) {
+        if (TrendyolSendProgress::isActive($dealer->id)) {
             return $this->back($dealer)->with(
                 'error',
-                'Bu bayi için gönderim zaten devam ediyor: '.($existing['message'] ?? 'çalışıyor').' Önce «Gönderimi durdur» butonuna basın.'
+                'Bu bayi için gönderim zaten devam ediyor: '.(TrendyolSendProgress::get($dealer->id)['message'] ?? 'çalışıyor').' Önce «Gönderimi durdur» butonuna basın.'
             );
         }
+
+        // Önceki gönderimden kalan benzersiz iş kilidini serbest bırak (en iyi çaba)
         try {
             Cache::lock('laravel_unique_job:trendyol-send-'.$dealer->id)->forceRelease();
         } catch (\Throwable) {
         }
 
         // Sayfa anında dönsün — gönderim kuyrukta
-        Cache::put('trendyol_send_status_'.$dealer->id, [
-            'status' => 'queued',
-            'message' => $countHint.' ürün kuyruğa alındı (limitsiz)…',
-            'queued_at' => now()->toIso8601String(),
-        ], now()->addHours(2));
+        TrendyolSendProgress::queued($dealer->id, $countHint.' ürün kuyruğa alındı…');
 
         SendDealerTrendyolCatalog::dispatch(
             $dealer->id,
@@ -202,6 +201,14 @@ class DealerTrendyolController extends Controller
 
         $n = $sendAll ? 'tüm stoklu ürünler' : (count($productIds).' ürün');
 
+        AdminAudit::log('trendyol.send', $dealer->company_name.' için '.$n.' Trendyol gönderim kuyruğuna alındı.', [
+            'dealer_id' => $dealer->id,
+            'send_all' => $sendAll,
+            'product_ids' => $sendAll ? null : $productIds,
+            'category_id' => $categoryId > 0 ? $categoryId : null,
+            'brand_id' => $brandId > 0 ? $brandId : null,
+        ]);
+
         return $this->back($dealer)->with(
             'success',
             $n.' Trendyol kuyruğuna alındı. İşlem arka planda sürer; birkaç dakika sonra Sonuç sorgula veya durum kutusunu kontrol edin.'
@@ -212,33 +219,22 @@ class DealerTrendyolController extends Controller
 
     public function cancelSend(Dealer $dealer): RedirectResponse
     {
-        Cache::put('trendyol_send_status_'.$dealer->id, [
-            'status' => 'cancelled',
-            'message' => 'Gönderim durduruldu. Kuyruk temizleniyor…',
-            'finished_at' => now()->toIso8601String(),
-        ], now()->addHours(6));
+        // Kuyruktaki batch işleri durumu her adımda kontrol eder; iptal bayrağını
+        // gördüklerinde Trendyol'a hiç dokunmadan kendilerini atlarlar.
+        // (Eskiden marketplace kuyruğu toptan siliniyordu; diğer bayilerin
+        // bekleyen işleri de kayboluyordu.)
+        TrendyolSendProgress::cancel(
+            $dealer->id,
+            'Gönderim durduruldu. Kuyruktaki işler atlanıyor; yeni gönderim başlatabilirsiniz.'
+        );
 
-        // marketplace kuyruğundaki bekleyen işleri sil
-        try {
-            \Illuminate\Support\Facades\DB::table('jobs')->where('queue', 'marketplace')->delete();
-        } catch (\Throwable $e) {
-            report($e);
-        }
-
-        // Unique lock serbest
+        // Benzersiz iş kilidi serbest (en iyi çaba)
         try {
             Cache::lock('laravel_unique_job:trendyol-send-'.$dealer->id)->forceRelease();
         } catch (\Throwable) {
         }
-        Cache::forget('laravel_unique_job:App\Jobs\SendDealerTrendyolCatalog:trendyol-send-'.$dealer->id);
 
-        Cache::put('trendyol_send_status_'.$dealer->id, [
-            'status' => 'cancelled',
-            'message' => 'Gönderim durduruldu. Yeni gönderim başlatabilirsiniz.',
-            'finished_at' => now()->toIso8601String(),
-        ], now()->addHours(6));
-
-        return $this->back($dealer)->with('success', 'Trendyol gönderimi durduruldu, kuyruk temizlendi.');
+        return $this->back($dealer)->with('success', 'Trendyol gönderimi durduruldu. Kuyrukta bekleyen işler atlanacak.');
     }
 
     public function deleteProducts(Request $request, Dealer $dealer): RedirectResponse
@@ -274,6 +270,12 @@ class DealerTrendyolController extends Controller
         ], now()->addHours(2));
 
         DeleteDealerTrendyolProducts::dispatch($dealer->id, $jobScope);
+
+        // Toplu silme geri alınamaz: denetim izine yaz
+        AdminAudit::log('trendyol.delete', $dealer->company_name.' için '.$label." Trendyol'dan silinmek üzere kuyruğa alındı.", [
+            'dealer_id' => $dealer->id,
+            'scope' => $jobScope,
+        ]);
 
         return $this->back($dealer)->with('success', $label.' Trendyol silme kuyruğuna alındı.');
     }

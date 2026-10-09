@@ -13,8 +13,11 @@ class EnsureAdminUser extends Command
 
     public function handle(): int
     {
-        $email = trim((string) env('ADMIN_EMAIL', ''));
-        $password = (string) env('ADMIN_PASSWORD', '');
+        // env() yerine config() kullanılır: config:cache uygulandığında env() null döner
+        // ve yönetici hesabı sessizce oluşmaz.
+        $email = mb_strtolower(trim((string) config('bayiinet.admin.email', '')));
+        $password = (string) config('bayiinet.admin.password', '');
+        $minLength = (int) config('bayiinet.admin.min_password_length', 8);
 
         if ($email === '' || $password === '') {
             $this->info('ADMIN_EMAIL / ADMIN_PASSWORD tanımlı değil, yönetici oluşturma atlandı.');
@@ -31,8 +34,8 @@ class EnsureAdminUser extends Command
         $user = User::query()->where('email', $email)->first();
 
         if ($user === null) {
-            if (mb_strlen($password) < 8) {
-                $this->error('ADMIN_PASSWORD en az 8 karakter olmalı.');
+            if (mb_strlen($password) < $minLength) {
+                $this->error("ADMIN_PASSWORD en az {$minLength} karakter olmalı.");
 
                 return self::FAILURE;
             }

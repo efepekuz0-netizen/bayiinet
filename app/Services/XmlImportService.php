@@ -134,8 +134,8 @@ class XmlImportService
             ]);
 
             Cache::forget('xml_feed_catalog');
-        Cache::forget('home_main_categories');
-        Cache::forget('admin_dash_stats_v2');
+            Cache::forget('home_main_categories_v2');
+            Cache::forget('admin_dash_stats_v2');
         } catch (\Throwable $e) {
             Log::error('XML Import Error: '.$e->getMessage());
             $import->update([
@@ -301,12 +301,23 @@ class XmlImportService
         $variantData = [];
         if (isset($item->variants->variant)) {
             foreach ($item->variants->variant as $variant) {
+                $variantPrice = $this->xmlText($variant, ['price', 'Price', 'Fiyat', 'fiyat', 'sale_price', 'salePrice']);
+
                 $variantData[] = [
-                    'barcode' => $this->xmlText($variant, ['barcode']),
-                    'name' => $this->xmlText($variant, ['name'], 'Seçenek'),
-                    'value' => $this->xmlText($variant, ['value']),
-                    'color' => $this->xmlText($variant, ['color']),
-                    'stock' => (int) $this->xmlText($variant, ['stock'], '0'),
+                    'barcode' => $this->xmlText($variant, ['barcode', 'Barkod']),
+                    'sku' => $this->xmlText($variant, ['sku', 'SKU', 'stock_code', 'StokKodu', 'code']),
+                    'name' => $this->xmlText($variant, ['name', 'VaryantAdi'], 'Seçenek'),
+                    'value' => $this->xmlText($variant, ['value', 'Deger']),
+                    'color' => $this->xmlText($variant, ['color', 'Renk']),
+                    'stock' => (int) $this->xmlText($variant, ['stock', 'Quantity', 'Stok', 'quantity'], '0'),
+                    'variant_price' => $variantPrice !== ''
+                        ? (float) str_replace(',', '.', $variantPrice)
+                        : null,
+                    'price_diff' => (float) str_replace(
+                        ',',
+                        '.',
+                        $this->xmlText($variant, ['price_diff', 'PriceDiff', 'fiyat_farki'], '0')
+                    ),
                 ];
             }
         }
@@ -339,8 +350,9 @@ class XmlImportService
 
         // Görseller
         $images = [];
-        $imageCount = (int) $this->xmlText($item, ['image_count'], '0');
-        for ($i = 1; $i <= max($imageCount, 15); $i++) {
+        // image_count her XML'de doğru gelmediği için en az 15 görsel etiketi taranır.
+        $imageCount = max((int) $this->xmlText($item, ['image_count'], '0'), 15);
+        for ($i = 1; $i <= $imageCount; $i++) {
             $image = $this->xmlText($item, [
                 "Image{$i}", "image_{$i}", "image{$i}", "IMAGE{$i}",
                 "Picture{$i}", "picture_{$i}", "img{$i}", "Img{$i}",
@@ -430,34 +442,111 @@ class XmlImportService
             ->whereIn('stock_code', $stockCodes)
             ->get(['id', 'stock_code'])
             ->keyBy('stock_code');
-        $productIds = $productsByStockCode->pluck('id');
-        ProductVariant::query()->whereIn('product_id', $productIds)->delete();
 
-        $variants = [];
+        $productIds = $productsByStockCode->pluck('id')->all();
+
+        // Varyantlar silinip yeniden yazılmaz: var olan kayıtlar güncellenir.
+        // Aksi hâlde her içe aktarmada varyant ID'leri değişiyor ve bayilerin
+        // Trendyol kayıtlarındaki varyant bağlantıları kopuyordu.
+        $this->syncVariants($batch, $productsByStockCode, $now);
+
+        // Satış fiyatları toplu hesaplanır; ürün başına modele dokunulmaz.
+        $pricing = app(PricingService::class);
+        $margin = (float) ($source->xml_margin_percent ?? $pricing->defaultXmlMargin());
+        $pricing->recalculateImported($productIds, $source->id, $margin);
+    }
+
+    /**
+     * Varyantları XML verisiyle eşitler: kimliği (barkod > stok kodu > ad+değer)
+     * bulunan kayıtlar güncellenir, yeniler eklenir, XML'den düşenler silinir.
+     *
+     * @param  array<string, array{data: array<string, mixed>, variants: array<int, array<string, mixed>>}>  $batch
+     */
+    protected function syncVariants(array $batch, \Illuminate\Support\Collection $productsByStockCode, $now): void
+    {
+        $productIds = $productsByStockCode->pluck('id')->all();
+        if ($productIds === []) {
+            return;
+        }
+
+        $existing = ProductVariant::query()
+            ->whereIn('product_id', $productIds)
+            ->get()
+            ->groupBy('product_id');
+
         foreach ($batch as $stockCode => $product) {
             $productId = $productsByStockCode->get($stockCode)?->id;
             if ($productId === null) {
                 continue;
             }
 
+            $current = $existing->get($productId, collect());
+            $matched = [];
+
             foreach ($product['variants'] as $variant) {
-                $variants[] = [
-                    'product_id' => $productId,
-                    ...$variant,
-                    'created_at' => $now,
-                    'updated_at' => $now,
+                $key = $this->variantKey($variant);
+
+                $match = $current->first(function (ProductVariant $candidate) use ($key, $matched): bool {
+                    if (in_array($candidate->id, $matched, true)) {
+                        return false;
+                    }
+
+                    return $this->variantKey([
+                        'barcode' => $candidate->barcode,
+                        'sku' => $candidate->sku,
+                        'name' => $candidate->name,
+                        'value' => $candidate->value,
+                    ]) === $key;
+                });
+
+                $data = [
+                    'barcode' => ($variant['barcode'] ?? '') !== '' ? $variant['barcode'] : null,
+                    'sku' => ($variant['sku'] ?? '') !== '' ? $variant['sku'] : null,
+                    'name' => $variant['name'] ?? 'Seçenek',
+                    'value' => $variant['value'] ?? '',
+                    'color' => ($variant['color'] ?? '') !== '' ? $variant['color'] : null,
+                    'stock' => (int) ($variant['stock'] ?? 0),
+                    'variant_stock' => (int) ($variant['stock'] ?? 0),
+                    'variant_price' => $variant['variant_price'] ?? null,
+                    'price_diff' => (float) ($variant['price_diff'] ?? 0),
                 ];
+
+                if ($match !== null) {
+                    $match->update($data + ['updated_at' => $now]);
+                    $matched[] = $match->id;
+
+                    continue;
+                }
+
+                ProductVariant::create(
+                    ['product_id' => $productId, 'created_at' => $now, 'updated_at' => $now] + $data
+                );
+            }
+
+            // XML'den çıkmış varyantlar silinir
+            $stale = $current->whereNotIn('id', $matched)->pluck('id')->all();
+            if ($stale !== []) {
+                ProductVariant::query()->whereIn('id', $stale)->delete();
+            }
+        }
+    }
+
+    /**
+     * Varyantın kaynak XML'deki kimliği: barkod > stok kodu > ad + değer.
+     *
+     * @param  array<string, mixed>  $variant
+     */
+    private function variantKey(array $variant): string
+    {
+        foreach (['barcode', 'sku'] as $field) {
+            $value = mb_strtolower(trim((string) ($variant[$field] ?? '')));
+            if ($value !== '') {
+                return $field.':'.$value;
             }
         }
 
-        if ($variants !== []) {
-            ProductVariant::query()->insert($variants);
-        }
-
-        $pricing = app(PricingService::class);
-        Product::query()->whereIn('id', $productIds)->each(function (Product $product) use ($pricing): void {
-            $pricing->applyToProduct($product);
-        });
+        return 'name:'.mb_strtolower(trim((string) ($variant['name'] ?? '')))
+            .'|'.mb_strtolower(trim((string) ($variant['value'] ?? '')));
     }
 
     protected function xmlText(\SimpleXMLElement $item, array $paths, string $default = ''): string

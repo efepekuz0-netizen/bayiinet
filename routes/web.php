@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AutomationController as AdminAutomationController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\DealerController as AdminDealerController;
 use App\Http\Controllers\Admin\DealerTrendyolController as AdminDealerTrendyolController;
@@ -25,9 +26,14 @@ Route::get('/urun/{product}', [HomeController::class, 'product'])->name('product
 
 Route::middleware('guest')->group(function () {
     Route::get('/giris', [AuthController::class, 'showLogin'])->name('login');
-    Route::post('/giris', [AuthController::class, 'login'])->name('login.store');
+    // Brute-force ve spam kayıt denemelerine karşı hız sınırlaması
+    Route::post('/giris', [AuthController::class, 'login'])
+        ->middleware('throttle:5,1')
+        ->name('login.store');
     Route::get('/bayilik-basvurusu', [AuthController::class, 'showRegister'])->name('register');
-    Route::post('/bayilik-basvurusu', [AuthController::class, 'register'])->name('register.store');
+    Route::post('/bayilik-basvurusu', [AuthController::class, 'register'])
+        ->middleware('throttle:3,1')
+        ->name('register.store');
 });
 
 Route::post('/cikis', [AuthController::class, 'logout'])->middleware('auth')->name('logout');
@@ -92,6 +98,9 @@ Route::middleware(['auth', 'admin'])
         Route::put('/kar-fiyat', [AdminOperationsController::class, 'updatePricing'])->name('pricing.update');
         Route::get('/xml-disari-aktar', [AdminOperationsController::class, 'exportXml'])->name('export.xml');
         Route::get('/kayitlar', [AdminOperationsController::class, 'imports'])->name('logs.index');
+        Route::get('/otomasyon', [AdminAutomationController::class, 'index'])->name('automation.index');
+        Route::post('/otomasyon/xml', [AdminAutomationController::class, 'runXml'])->name('automation.xml');
+        Route::post('/otomasyon/trendyol', [AdminAutomationController::class, 'runTrendyol'])->name('automation.trendyol');
         Route::get('/ayarlar', [AdminOperationsController::class, 'settings'])->name('settings.index');
         Route::put('/ayarlar', [AdminOperationsController::class, 'updateSettings'])->name('settings.update');
         Route::get('/pazaryeri', [AdminMarketplaceController::class, 'index'])->name('marketplace.index');

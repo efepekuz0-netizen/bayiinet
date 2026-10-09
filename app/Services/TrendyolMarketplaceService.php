@@ -274,15 +274,24 @@ class TrendyolMarketplaceService
             ->withHeaders(['User-Agent' => $connection->account_id.' - SelfIntegration'])
             ->acceptJson()
             ->connectTimeout(8)
-            ->timeout(25)
-            ->withoutRedirecting();
+            ->timeout(30)
+            ->withoutRedirecting()
+            // Yalnızca ağ/bağlantı hatalarında yeniden dener (429 ve 5xx için
+            // çağıran taraf kendi bekleme stratejisini uygular).
+            ->retry(
+                max(1, (int) config('bayiinet.trendyol.retry_times', 3)),
+                max(200, (int) config('bayiinet.trendyol.retry_sleep_ms', 1500)),
+                fn (\Throwable $exception): bool => $exception instanceof \Illuminate\Http\Client\ConnectionException,
+            );
 
         $response = match ($method) {
             'GET' => $request->get(self::BASE_URL.$path, $data),
             'POST' => $request->post(self::BASE_URL.$path, $data),
             'PUT' => $request->put(self::BASE_URL.$path, $data),
-            'DELETE' => $request->withBody(json_encode($data, JSON_UNESCAPED_UNICODE), 'application/json')
-                ->delete(self::BASE_URL.$path),
+            // Not: withBody() + delete() birlikte kullanıldığında Laravel gövdeyi
+            // göndermiyordu (bodyFormat 'body' iken veri yok sayılıyor). Bu yüzden
+            // gövde doğrudan delete() ikinci parametresiyle geçilir.
+            'DELETE' => $request->delete(self::BASE_URL.$path, $data),
             default => throw new LogicException('Desteklenmeyen Trendyol API isteği.'),
         };
 

@@ -3,8 +3,8 @@
 namespace App\Jobs;
 
 use App\Models\Dealer;
-use App\Models\DealerTrendyolListing;
 use App\Services\DealerTrendyolService;
+use App\Services\TrendyolSendProgress;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -44,42 +44,32 @@ class VerifyTrendyolBatch implements ShouldQueue
             return;
         }
 
-        $listings = DealerTrendyolListing::query()
-            ->where('dealer_id', $dealer->id)
-            ->where('batch_request_id', $this->batchRequestId)
-            ->where('status', 'sent')
-            ->get();
-
-        if ($listings->isEmpty()) {
-            return;
-        }
-
-        $map = [];
-        foreach ($listings as $l) {
-            $map[(string) $l->barcode] = $l->id;
-        }
-
         try {
-            $connection = $trendyol->connection($dealer);
-            // public recheck via checkBatch
+            // Trendyol'un batch sonucunu oku; listing durumlarını günceller
             $result = $trendyol->checkBatch($dealer, $this->batchRequestId);
+
             Log::info('VerifyTrendyolBatch', [
                 'dealer_id' => $this->dealerId,
                 'batch' => $this->batchRequestId,
                 'result' => $result,
             ]);
-            // Hâlâ sent kalan varsa tekrar dene
-            $still = DealerTrendyolListing::query()
-                ->where('dealer_id', $dealer->id)
-                ->where('batch_request_id', $this->batchRequestId)
-                ->where('status', 'sent')
-                ->exists();
-            if ($still) {
-                $this->release(30);
-            }
         } catch (Throwable $e) {
-            Log::warning('VerifyTrendyolBatch failed', ['error' => $e->getMessage()]);
+            Log::warning('VerifyTrendyolBatch failed', [
+                'dealer_id' => $this->dealerId,
+                'batch' => $this->batchRequestId,
+                'error' => $e->getMessage(),
+            ]);
             $this->release(45);
+
+            return;
+        }
+
+        // Sonuçları gönderim ekranına yansıt (idempotent)
+        $resolved = TrendyolSendProgress::resolveBatch($this->dealerId, $this->batchRequestId);
+
+        // Hâlâ sonuçlanmamış kalem varsa bir kez daha dene
+        if (($resolved['pending'] ?? 0) > 0 && $this->attempts() < $this->tries) {
+            $this->release(30);
         }
     }
 }
