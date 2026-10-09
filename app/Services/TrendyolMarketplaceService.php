@@ -229,8 +229,8 @@ class TrendyolMarketplaceService
                     }
                 }
 
-                // Masaüstü product_onboard BRAND_ID
-                return 2613880;
+                // Yapılandırılabilir yedek marka (varsayılan: masaüstü BRAND_ID)
+                return (int) config('bayiinet.trendyol.fallback_brand_id', 2613880);
             }
         );
     }

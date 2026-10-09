@@ -17,38 +17,49 @@
                     <th>Ad</th>
                     <th>Tip</th>
                     <th>XML bağlantısı</th>
-                    <th>Ürün</th>
-                    <th>Son Import</th>
+                    <th class="text-end">Ürün</th>
+                    <th>Fiyatlama</th>
+                    <th>Son içe aktarma</th>
                     <th>Durum</th>
                     <th>İşlem</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
-            @foreach($sources as $source)
+            @forelse($sources as $source)
                 <tr>
-                    <td>{{ $source->name }}</td>
-                    <td>{{ $source->type === 'url' ? 'Bağlantı' : 'Dosya' }}</td>
-                    <td class="text-break" style="max-width:260px">{{ $source->url ?? '-' }}</td>
-                    <td>{{ $source->products_count }}</td>
-                    <td><span class="badge text-bg-light">Kâr %{{ number_format($source->xml_margin_percent ?? 0, 1) }}</span> <span class="badge text-bg-light">KDV %{{ number_format($source->tax_rate ?? 0, 1) }}</span></td>
-                    <td>{{ $source->last_imported_at?->diffForHumans() ?? '-' }}</td>
                     <td>
-                        <a href="{{ route('admin.sources.edit', $source) }}" class="btn btn-sm btn-outline-secondary">Ayarlar</a>
-                        @if($source->is_active)
-                            <span class="badge bg-success">Aktif</span>
-                        @else
-                            <span class="badge bg-secondary">Pasif</span>
+                        <div class="fw-semibold">{{ $source->name }}</div>
+                        @if($source->last_error)
+                            <div class="small text-danger text-truncate" style="max-width:280px" title="{{ $source->last_error }}">
+                                <i class="bi bi-exclamation-circle me-1"></i>{{ Str::limit($source->last_error, 70) }}
+                            </div>
                         @endif
                     </td>
+                    <td><span class="badge text-bg-light border">{{ $source->type === 'url' ? 'Bağlantı' : 'Dosya' }}</span></td>
+                    <td class="text-break small" style="max-width:260px">{{ $source->url ?? '-' }}</td>
+                    <td class="text-end">{{ number_format($source->products_count ?? 0) }}</td>
+                    <td class="text-nowrap">
+                        <span class="badge text-bg-light border">Kâr %{{ number_format($source->xml_margin_percent ?? 0, 1) }}</span>
+                        <span class="badge text-bg-light border">KDV %{{ number_format($source->tax_rate ?? 0, 1) }}</span>
+                    </td>
+                    <td class="text-nowrap small">{{ $source->last_imported_at?->diffForHumans() ?? '—' }}</td>
                     <td>
+                        @if($source->is_active)
+                            <span class="badge text-bg-success">Aktif</span>
+                        @else
+                            <span class="badge text-bg-secondary">Pasif</span>
+                        @endif
+                    </td>
+                    <td class="text-nowrap">
+                        <a href="{{ route('admin.sources.edit', $source) }}" class="btn btn-sm btn-outline-secondary">Ayarlar</a>
                         @if($source->type === 'url')
-                            <form action="{{ route('admin.sources.refresh', $source) }}" method="POST">
+                            <form action="{{ route('admin.sources.refresh', $source) }}" method="POST" class="d-inline">
                                 @csrf
                                 <button class="btn btn-sm btn-outline-primary">Bağlantıdan güncelle</button>
                             </form>
                         @else
-                            <form action="{{ route('admin.sources.upload', $source) }}" method="POST" enctype="multipart/form-data" class="d-flex gap-1">
+                            <form action="{{ route('admin.sources.upload', $source) }}" method="POST" enctype="multipart/form-data" class="d-inline-flex gap-1 align-middle">
                                 @csrf
                                 <input type="file" name="xml_file" accept=".xml,.txt" class="form-control form-control-sm" required style="max-width:180px">
                                 <button class="btn btn-sm btn-outline-primary">Yükle</button>
@@ -62,7 +73,9 @@
                         </form>
                     </td>
                 </tr>
-            @endforeach
+            @empty
+                <tr><td colspan="9" class="text-center text-muted py-4">Henüz XML kaynağı yok.</td></tr>
+            @endforelse
             </tbody>
         </table>
     </div>
@@ -88,7 +101,7 @@
                 <tr>
                     <td>{{ $imp->source->name ?? '-' }}</td>
                     <td>{{ $imp->file_name }}</td>
-                    <td><span class="badge bg-{{ $imp->status === 'completed' ? 'success' : ($imp->status === 'failed' ? 'danger' : 'warning') }}">{{ $imp->status }}</span></td>
+                    <td><span class="badge text-bg-{{ $imp->status_tone }}">{{ $imp->status_label }}</span></td>
                     <td>{{ $imp->created_count }}</td>
                     <td>{{ $imp->updated_count }}</td>
                     <td>{{ $imp->error_count }}</td>

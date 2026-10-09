@@ -65,7 +65,6 @@ class DatabaseSeeder extends Seeder
                 'tax_rate' => 10,
                 'desi' => 0.5,
                 'stock' => 150,
-                'images' => ['https://via.placeholder.com/600x800?text=Tisort'],
             ],
             [
                 'stock_code' => 'DEMO-002',
@@ -80,7 +79,6 @@ class DatabaseSeeder extends Seeder
                 'tax_rate' => 20,
                 'desi' => 0.3,
                 'stock' => 75,
-                'images' => ['https://via.placeholder.com/600x600?text=Kulaklik'],
             ],
             [
                 'stock_code' => 'DEMO-003',
@@ -95,7 +93,6 @@ class DatabaseSeeder extends Seeder
                 'tax_rate' => 10,
                 'desi' => 2.0,
                 'stock' => 40,
-                'images' => ['https://via.placeholder.com/600x600?text=Mutfak'],
             ],
             [
                 'stock_code' => 'DEMO-004',
@@ -110,7 +107,6 @@ class DatabaseSeeder extends Seeder
                 'tax_rate' => 10,
                 'desi' => 1.0,
                 'stock' => 3,
-                'images' => ['https://via.placeholder.com/600x600?text=Lamba'],
             ],
         ];
 

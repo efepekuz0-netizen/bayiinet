@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\BalanceTransaction;
+use App\Services\AdminAudit;
 use App\Models\Dealer;
 use App\Models\Order;
 use App\Models\Product;
@@ -108,6 +109,12 @@ class OrderController extends Controller
 
             $lockedOrder->update($data);
         });
+        AdminAudit::log('order.status', $order->order_number.' siparişi «'.$order->status.'» durumuna alındı.', [
+            'order_id' => $order->id,
+            'status' => $data['status'],
+            'previous_status' => $order->getOriginal('status'),
+        ]);
+
         Cache::forget('xml_feed_catalog');
 
         return back()->with('success', 'Sipariş güncellendi.');
