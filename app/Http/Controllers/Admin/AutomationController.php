@@ -100,8 +100,8 @@ class AutomationController extends Controller
         try {
             $pending = (int) DB::table('jobs')->count();
             $failed = (int) DB::table('failed_jobs')->count();
-            $done = (int) DB::table('job_batches')
-                ->where('finished_at', '>=', now()->subDay())
+            $done = (int) DB::table('jobs')
+                ->where('queue', 'marketplace')
                 ->count();
         } catch (\Throwable) {
             return ['pending' => 0, 'failed' => 0, 'done' => 0];

@@ -79,6 +79,7 @@ Schedule::call(function (): void {
     );
 })->everyFifteenMinutes()->name('trendyol-recheck-sent')->withoutOverlapping(10);
 
-// Kuyruk bakımı: eski batch/failed kayıtları temizle
-Schedule::command('queue:prune-batches --hours=48')->daily()->name('queue-prune-batches');
+// Kuyruk bakımı: eski başarısız iş kayıtlarını temizle
+// Not: job_batches tablosu bu projede kullanılmıyor (migration yok),
+// bu yüzden yalnızca failed_jobs temizlenir.
 Schedule::command('queue:prune-failed --hours=168')->weekly()->name('queue-prune-failed');

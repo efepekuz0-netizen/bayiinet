@@ -36,7 +36,7 @@
                 <div class="text-muted small">Kuyrukta bekleyen iş</div>
                 <div class="fs-5 fw-semibold">{{ number_format($queue['pending'], 0, ',', '.') }}</div>
                 <div class="text-muted small mt-1">
-                    Gecikmiş: {{ number_format($queue['failed'], 0, ',', '.') }} · 24 saatte tamamlanan: {{ number_format($queue['done'], 0, ',', '.') }}
+                    Trendyol kuyruğu: {{ number_format($queue['done'], 0, ',', '.') }} · başarısız: {{ number_format($queue['failed'], 0, ',', '.') }}
                 </div>
             </div>
         </div>
