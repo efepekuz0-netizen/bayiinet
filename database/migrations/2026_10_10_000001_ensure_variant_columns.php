@@ -3,7 +3,6 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use Throwable;
 
 /**
  * Yarım kalmış migration'lar yüzünden product_variants tablosu hiç

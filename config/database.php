@@ -1,7 +1,12 @@
 <?php
 
 use Illuminate\Support\Str;
-use Pdo\Mysql;
+
+// PHP 8.4+ -> Pdo\Mysql::ATTR_SSL_CA, PHP 8.3 -> PDO::MYSQL_ATTR_SSL_CA.
+// Pdo\Mysql sinifi 8.3'te yok; dogrudan kullanmak her istekte "Class not found" hatasi verir.
+$mysqlSslCaAttr = defined('Pdo\Mysql::ATTR_SSL_CA')
+    ? constant('Pdo\Mysql::ATTR_SSL_CA')
+    : (defined('PDO::MYSQL_ATTR_SSL_CA') ? constant('PDO::MYSQL_ATTR_SSL_CA') : null);
 
 return [
 
@@ -59,8 +64,8 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
-            'options' => extension_loaded('pdo_mysql') ? array_filter([
-                Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            'options' => (extension_loaded('pdo_mysql') && $mysqlSslCaAttr !== null) ? array_filter([
+                $mysqlSslCaAttr => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
         ],
 
@@ -79,8 +84,8 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
-            'options' => extension_loaded('pdo_mysql') ? array_filter([
-                Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            'options' => (extension_loaded('pdo_mysql') && $mysqlSslCaAttr !== null) ? array_filter([
+                $mysqlSslCaAttr => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
         ],
 
