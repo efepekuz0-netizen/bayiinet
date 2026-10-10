@@ -25,17 +25,32 @@ class AuthController extends Controller
             'password' => 'required',
         ]);
 
-        if (Auth::attempt($credentials, $request->boolean('remember'))) {
-            $request->session()->regenerate();
+        if (! Auth::attempt($credentials, $request->boolean('remember'))) {
+            return back()->withErrors(['email' => 'E-posta veya şifre hatalı.'])->onlyInput('email');
+        }
 
+        $request->session()->regenerate();
+
+        try {
             $user = Auth::user();
+
             if ($user->isAdmin()) {
                 return redirect()->route('admin.dashboard');
             }
 
             if ($user->isDealer()) {
-                // Bayi profili yoksa veya askıdaysa başvuru sayfası
-                $dealer = $user->dealer;
+                try {
+                    $dealer = $user->dealer;
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::error('login dealer load failed', [
+                        'user_id' => $user->id,
+                        'error' => $e->getMessage(),
+                    ]);
+
+                    return redirect()->route('home')
+                        ->with('error', 'Hesap bilgileri yüklenemedi. Destek ile iletişime geçin.');
+                }
+
                 if (! $dealer || $dealer->status !== 'active') {
                     return redirect()->route('dealer.application');
                 }
@@ -49,9 +64,17 @@ class AuthController extends Controller
             }
 
             return redirect()->intended(route('home'));
-        }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('login redirect failed', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
 
-        return back()->withErrors(['email' => 'E-posta veya şifre hatalı.'])->onlyInput('email');
+            // Oturum açıldı ama yönlendirme patladıysa en azından ana sayfaya düş
+            return redirect()->route('home')
+                ->with('error', 'Giriş yapıldı ancak panele yönlendirme başarısız. Ana sayfadan devam edin.');
+        }
     }
 
     public function showRegister()

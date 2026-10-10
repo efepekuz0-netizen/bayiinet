@@ -38,7 +38,7 @@ class Dealer extends Model
     ];
 
     protected $casts = [
-        'trendyol_credentials' => 'encrypted:array',
+        'trendyol_credentials' => \App\Casts\SafeEncryptedArray::class,
         'balance' => 'decimal:2',
         'default_marketplace_margin' => 'decimal:2',
         'auto_sync_enabled' => 'boolean',

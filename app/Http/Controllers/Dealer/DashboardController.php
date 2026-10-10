@@ -86,24 +86,38 @@ class DashboardController extends Controller
 
     public function index()
     {
-        $dealer = auth()->user()->dealer;
+        try {
+            $dealer = auth()->user()->dealer;
+            if (! $dealer) {
+                return redirect()->route('dealer.application');
+            }
 
-        $stats = [
-            'balance' => $dealer->balance,
-            'orders' => Order::where('dealer_id', $dealer->id)->count(),
-            'pending_orders' => Order::where('dealer_id', $dealer->id)->whereIn('status', ['pending', 'paid', 'preparing'])->count(),
-            'products' => Product::where('is_active', true)->count(),
-        ];
+            $stats = [
+                'balance' => $dealer->balance,
+                'orders' => Order::where('dealer_id', $dealer->id)->count(),
+                'pending_orders' => Order::where('dealer_id', $dealer->id)->whereIn('status', ['pending', 'paid', 'preparing'])->count(),
+                'products' => Product::where('is_active', true)->count(),
+            ];
 
-        $recentOrders = Order::where('dealer_id', $dealer->id)->latest()->take(8)->get();
-        $announcements = DealerAnnouncement::query()
-            ->where('is_active', true)
-            ->where(fn ($query) => $query->whereNull('starts_at')->orWhere('starts_at', '<=', now()))
-            ->where(fn ($query) => $query->whereNull('ends_at')->orWhere('ends_at', '>=', now()))
-            ->latest()
-            ->take(5)
-            ->get();
+            $recentOrders = Order::where('dealer_id', $dealer->id)->latest()->take(8)->get();
+            $announcements = collect();
+            try {
+                $announcements = DealerAnnouncement::query()
+                    ->where('is_active', true)
+                    ->where(fn ($query) => $query->whereNull('starts_at')->orWhere('starts_at', '<=', now()))
+                    ->where(fn ($query) => $query->whereNull('ends_at')->orWhere('ends_at', '>=', now()))
+                    ->latest()
+                    ->take(5)
+                    ->get();
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('dealer announcements failed', ['error' => $e->getMessage()]);
+            }
 
-        return view('dealer.dashboard', compact('dealer', 'stats', 'recentOrders', 'announcements'));
+            return view('dealer.dashboard', compact('dealer', 'stats', 'recentOrders', 'announcements'));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('dealer dashboard failed', ['error' => $e->getMessage()]);
+
+            return redirect()->route('home')->with('error', 'Panel yüklenemedi: '.$e->getMessage());
+        }
     }
 }
