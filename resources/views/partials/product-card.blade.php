@@ -76,7 +76,7 @@
             </div>
         </a>
         @auth
-            @if(auth()->user()->isDealer() && auth()->user()->dealer?->isActive())
+            @if(auth()->user()->isDealer())
                 <div class="px-2 px-md-3 pb-3 mt-auto">
                     @if($stock > 0)
                         <a href="{{ route('dealer.orders.create', ['product' => $product->id]) }}" class="btn btn-primary btn-sm w-100">

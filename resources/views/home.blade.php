@@ -459,7 +459,7 @@
                     <div class="col-6">
                         <div class="hero-stat">
                             <div class="label">Aktif ürün</div>
-                            <div class="value">{{ number_format($products->total()) }}+</div>
+                            <div class="value">{{ number_format((method_exists($products, 'total') ? $products->total() : $products->count())) }}+</div>
                         </div>
                     </div>
                     <div class="col-6">
@@ -531,9 +531,9 @@
             <h2 class="section-title mb-1"><i class="bi bi-box-seam"></i> Ürün kataloğu</h2>
             <div class="section-sub">
                 @if(request('q') || request('kategori'))
-                    Aramanıza uygun {{ number_format($products->total()) }} ürün listeleniyor
+                    Aramanıza uygun {{ number_format((method_exists($products, 'total') ? $products->total() : $products->count())) }} ürün listeleniyor
                 @else
-                    Toplam {{ number_format($products->total()) }} ürün · sayfa {{ $products->currentPage() }} / {{ max($products->lastPage(), 1) }}
+                    Toplam {{ number_format((method_exists($products, 'total') ? $products->total() : $products->count())) }} ürün · sayfa {{ $products->currentPage() }} / {{ max($products->lastPage(), 1) }}
                 @endif
             </div>
         </div>

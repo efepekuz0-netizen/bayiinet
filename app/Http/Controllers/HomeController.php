@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
@@ -13,22 +13,37 @@ class HomeController extends Controller
 {
     public function index(Request $request)
     {
+        $products = $this->emptyPaginator($request);
+        $categories = collect();
+        $featured = collect();
+        $error = null;
+
         try {
+            if (! Schema::hasTable('products')) {
+                return view('home', compact('products', 'categories', 'featured'))
+                    ->with('error', 'Ürün tablosu henüz hazır değil. Deploy/migrate bekleniyor.');
+            }
+
             $query = Product::query()->where('is_active', true);
 
-            // Kolon yoksa (migration kaçmışsa) siteyi düşürme
-            if ($this->hasProductColumn('show_on_homepage')) {
+            // Sadece var olan kolonlarla filtrele — migration kaçmışsa patlamasın
+            $cols = Schema::getColumnListing('products');
+
+            if (in_array('show_on_homepage', $cols, true)) {
                 $query->where(function ($q) {
                     $q->where('show_on_homepage', true)->orWhereNull('show_on_homepage');
                 });
             }
 
-            // Stok: has_variants false + stock>0 VEYA varyantlı (basit, ağır orWhereHas yok)
-            $query->where(function ($q) {
-                $q->where(function ($plain) {
-                    $plain->where('has_variants', false)->where('stock', '>', 0);
-                })->orWhere('has_variants', true);
-            });
+            if (in_array('has_variants', $cols, true)) {
+                $query->where(function ($q) {
+                    $q->where(function ($plain) {
+                        $plain->where('has_variants', false)->where('stock', '>', 0);
+                    })->orWhere('has_variants', true);
+                });
+            } else {
+                $query->where('stock', '>', 0);
+            }
 
             if ($search = trim((string) $request->get('q', ''))) {
                 $query->where(function ($q) use ($search) {
@@ -38,116 +53,70 @@ class HomeController extends Controller
                 });
             }
 
-            if ($cat = trim((string) $request->get('kategori', ''))) {
-                $query->where(function ($q) use ($cat) {
-                    $q->where('main_category', $cat)
-                        ->orWhere('category_path', 'like', "%{$cat}%");
+            $cat = trim((string) $request->get('kategori', ''));
+            if ($cat !== '' && in_array('main_category', $cols, true)) {
+                $query->where(function ($q) use ($cat, $cols) {
+                    $q->where('main_category', $cat);
+                    if (in_array('category_path', $cols, true)) {
+                        $q->orWhere('category_path', 'like', "%{$cat}%");
+                    }
                 });
             }
 
-            $orderCol = $this->hasProductColumn('last_synced_at') ? 'last_synced_at' : 'id';
-            $products = $query->orderByDesc($orderCol)->paginate(24)->withQueryString();
+            $orderCol = in_array('last_synced_at', $cols, true) ? 'last_synced_at' : 'id';
+            $products = $query->orderByDesc($orderCol)->simplePaginate(24)->withQueryString();
 
-            $categories = Cache::remember('home_main_categories_v2', 600, function () {
-                try {
-                    return Product::query()
-                        ->where('is_active', true)
-                        ->whereNotNull('main_category')
-                        ->where('main_category', '!=', '')
-                        ->select('main_category')
-                        ->distinct()
-                        ->orderBy('main_category')
-                        ->pluck('main_category')
-                        ->values();
-                } catch (Throwable $e) {
-                    Log::warning('home categories failed', ['error' => $e->getMessage()]);
-
-                    return collect();
-                }
-            });
-
-            $featured = collect();
-            if ($this->hasProductColumn('is_featured')) {
-                try {
-                    $featured = Product::query()
-                        ->where('is_active', true)
-                        ->where('is_featured', true)
-                        ->where(function ($q) {
-                            $q->where(function ($plain) {
-                                $plain->where('has_variants', false)->where('stock', '>', 0);
-                            })->orWhere('has_variants', true);
-                        })
-                        ->orderByDesc($orderCol)
-                        ->take(8)
-                        ->get();
-                } catch (Throwable $e) {
-                    Log::warning('home featured failed', ['error' => $e->getMessage()]);
-                }
+            if (in_array('main_category', $cols, true)) {
+                $categories = Product::query()
+                    ->where('is_active', true)
+                    ->whereNotNull('main_category')
+                    ->where('main_category', '!=', '')
+                    ->distinct()
+                    ->orderBy('main_category')
+                    ->limit(40)
+                    ->pluck('main_category');
             }
 
-            return $this->renderHome($request, $products, $categories, $featured);
+            if (in_array('is_featured', $cols, true)) {
+                $featured = Product::query()
+                    ->where('is_active', true)
+                    ->where('is_featured', true)
+                    ->orderByDesc($orderCol)
+                    ->limit(8)
+                    ->get();
+            }
         } catch (Throwable $e) {
-            Log::error('HomeController::index failed', [
+            Log::error('HomeController::index', [
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
             ]);
-
-            // Boş katalog ile yine de sayfa açılsın.
-            // Veritabanına erişilemiyorsa (en olası 500 sebebi) tekrar
-            // sorgu atmıyoruz: sayfalayıcıyı tamamen bellekte kuruyoruz.
-            $products = new \Illuminate\Pagination\LengthAwarePaginator(
-                [],
-                0,
-                24,
-                1,
-                [
-                    'path' => $request->url(),
-                    'query' => $request->query(),
-                ]
-            );
+            $error = 'Katalog geçici olarak yüklenemedi.';
+            $products = $this->emptyPaginator($request);
             $categories = collect();
             $featured = collect();
-
-            return $this->renderHome($request, $products, $categories, $featured)
-                ->with('error', 'Katalog geçici olarak yüklenemedi. Lütfen biraz sonra tekrar deneyin.');
         }
-    }
 
-    /**
-     * Ürün kartı / şablon render edilirken oluşan hatalar yüzünden site 500
-     * vermesin: hata loglanır, ikinci denemede katalog boş gösterilir.
-     * Gerçek sebep Yönetim → Sistem Sağlığı ekranında görünür.
-     */
-    private function renderHome(Request $request, $products, $categories, $featured)
-    {
         try {
-            return view('home', compact('products', 'categories', 'featured'));
+            return view('home', [
+                'products' => $products,
+                'categories' => $categories,
+                'featured' => $featured,
+                'error' => $error,
+            ]);
         } catch (Throwable $e) {
-            Log::error('HomeController: home view render failed', [
+            Log::error('HomeController::view', [
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
-                'trace' => \Illuminate\Support\Str::limit($e->getTraceAsString(), 1500),
             ]);
 
-            $empty = new \Illuminate\Pagination\LengthAwarePaginator(
-                [],
-                0,
-                24,
-                1,
-                [
-                    'path' => $request->url(),
-                    'query' => $request->query(),
-                ]
+            // Blade bile patlarsa düz HTML dön — 500 yerine mesaj
+            return response(
+                '<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bayiinet</title></head><body style="font-family:system-ui;max-width:640px;margin:3rem auto;padding:0 1rem"><h1>Bayiinet</h1><p>Ana sayfa geçici olarak gösterilemiyor.</p><p><a href="/giris">Giriş yap</a> · <a href="/bayilik-basvurusu">Bayilik başvurusu</a></p><pre style="background:#f5f5f5;padding:1rem;font-size:12px;overflow:auto">'.e($e->getMessage()).'</pre></body></html>',
+                200,
+                ['Content-Type' => 'text/html; charset=UTF-8']
             );
-
-            return view('home', [
-                'products' => $empty,
-                'categories' => collect(),
-                'featured' => collect(),
-                'error' => 'Ürün listesi şu anda gösterilemiyor. Ayrıntı için Yönetim → Sistem Sağlığı ekranına bakın.',
-            ]);
         }
     }
 
@@ -155,47 +124,31 @@ class HomeController extends Controller
     {
         abort_unless($product->is_active, 404);
 
-        if ($this->hasProductColumn('show_on_homepage') && $product->show_on_homepage === false) {
-            abort(404);
+        try {
+            $product->load('variants');
+        } catch (Throwable) {
+            // varyant tablosu yoksa devam
         }
 
-        $product->load('variants');
-
-        $related = Product::query()
-            ->where('is_active', true)
-            ->where('id', '!=', $product->id)
-            ->when($product->main_category, fn ($q) => $q->where('main_category', $product->main_category))
-            ->where(function ($q) {
-                $q->where(function ($plain) {
-                    $plain->where('has_variants', false)->where('stock', '>', 0);
-                })->orWhere('has_variants', true);
-            })
-            ->take(8)
-            ->get();
+        $related = collect();
+        try {
+            $related = Product::query()
+                ->where('is_active', true)
+                ->where('id', '!=', $product->id)
+                ->when($product->main_category, fn ($q) => $q->where('main_category', $product->main_category))
+                ->limit(8)
+                ->get();
+        } catch (Throwable) {
+        }
 
         return view('product-detail', compact('product', 'related'));
     }
 
-    /**
-     * Kolon varlığını istek içinde bir kez, sunucu genelinde ise 1 saat önbelleğe alır.
-     * (Eskiden her çağrıda önbellek sorgusu + şema sorgusu yapılıyordu.)
-     */
-    private function hasProductColumn(string $column): bool
+    private function emptyPaginator(Request $request): LengthAwarePaginator
     {
-        static $memo = [];
-
-        if (array_key_exists($column, $memo)) {
-            return $memo[$column];
-        }
-
-        try {
-            return $memo[$column] = (bool) Cache::remember(
-                'schema_products_has_'.$column,
-                3600,
-                fn () => Schema::hasColumn('products', $column)
-            );
-        } catch (Throwable) {
-            return $memo[$column] = false;
-        }
+        return new LengthAwarePaginator([], 0, 24, 1, [
+            'path' => $request->url(),
+            'query' => $request->query(),
+        ]);
     }
 }

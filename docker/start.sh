@@ -1,40 +1,27 @@
 #!/bin/sh
-# Render konteyneri başlangıç betiği
 cd /app || exit 1
 
-# APP_KEY girilmemişse geçici bir anahtar üret (oturumlar her yeniden başlatmada sıfırlanır)
 if [ -z "$APP_KEY" ]; then
-    echo "UYARI: APP_KEY tanimli degil, gecici anahtar uretiliyor. Render > Environment bolumune APP_KEY ekleyin."
+    echo "UYARI: APP_KEY tanimli degil, gecici anahtar uretiliyor. Render Environment'a sabit APP_KEY ekleyin."
     APP_KEY="$(php artisan key:generate --show)"
     export APP_KEY
 fi
 
-php artisan config:clear
-php artisan route:clear
-php artisan view:clear
+mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache
+chmod -R 775 storage bootstrap/cache 2>/dev/null || true
 
-# Tabloları oluştur / güncelle. Başarısız olursa sebebi loglara yazılır, site yine de açılır.
-php artisan migrate --force || echo "UYARI: migrate basarisiz. DB baglantisi ve env degerlerini kontrol edin."
+php artisan config:clear || true
+php artisan route:clear || true
+php artisan view:clear || true
+
+php artisan migrate --force || echo "UYARI: migrate basarisiz"
 php artisan storage:link 2>/dev/null || true
-php artisan cache:clear 2>/dev/null || true
-php artisan view:clear 2>/dev/null || true
-
-# ADMIN_EMAIL ve ADMIN_PASSWORD tanımlıysa ilk yönetici hesabını oluştur
 php artisan bayiinet:ensure-admin || true
 
-# Takılı / başarısız kuyruk işlerini temizle (attempted too many times)
-php artisan queue:flush 2>/dev/null || true
-php artisan queue:prune-failed --hours=0 2>/dev/null || true
-php artisan queue:clear marketplace --force 2>/dev/null || true
-
-# Kuyruk işçileri: default (kar oranı, genel işler) + marketplace (Trendyol) + zamanlayıcı
-# --tries: iş sınıfının kendi \$tries değeri her zaman önceliklidir; buradaki değer
-# yalnızca \$tries tanımlamayan işler için varsayılandır.
-# --timeout, veritabanı kuyruğunun retry_after (960 sn) değerinden KÜÇÜK olmalı;
-# aksi hâlde uzun süren işler ikinci bir işçiye yeniden düşer.
-php artisan queue:work --queue=default,marketplace --sleep=2 --tries=3 --timeout=900 --memory=512 &
+# OOM / 502 onlemi: tek kuyruk iscisi, dusuk worker
+php artisan queue:work --queue=default,marketplace --sleep=3 --tries=2 --timeout=600 --memory=256 &
 php artisan schedule:work &
 
-# --no-reload: ortam değişkenlerinin (APP_KEY, DB_*) uygulamaya iletilmesi için şart
-export PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}"
+# php built-in server: 1 worker (Render free/low RAM)
+export PHP_CLI_SERVER_WORKERS=1
 exec php artisan serve --host=0.0.0.0 --port="${PORT:-10000}" --no-reload
