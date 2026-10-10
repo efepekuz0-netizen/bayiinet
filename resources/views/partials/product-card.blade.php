@@ -15,10 +15,10 @@
 
     $price = (float) ($product->sell_price ?? $product->price ?? 0);
 
-    // effective_stock varyant tablosuna sorgu atabilir; tablo/kolon eksikse
+    // stock varyant tablosuna sorgu atabilir; tablo/kolon eksikse
     // sayfayı 500'e düşürmemek için burada da korumaya alıyoruz.
     try {
-        $stock = (int) ($product->effective_stock ?? 0);
+        $stock = (int) ($product->stock ?? 0);
     } catch (\Throwable $e) {
         $stock = (int) ($product->stock ?? 0);
     }

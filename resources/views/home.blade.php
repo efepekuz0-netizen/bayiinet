@@ -533,7 +533,7 @@
                 @if(request('q') || request('kategori'))
                     Aramanıza uygun {{ number_format((method_exists($products, 'total') ? $products->total() : $products->count())) }} ürün listeleniyor
                 @else
-                    Toplam {{ number_format((method_exists($products, 'total') ? $products->total() : $products->count())) }} ürün · sayfa {{ $products->currentPage() }} / {{ max($products->lastPage(), 1) }}
+                    Toplam {{ number_format((method_exists($products, 'total') ? $products->total() : $products->count())) }} ürün · sayfa {{ $products->currentPage() }}@if(method_exists($products, 'lastPage')) / {{ max($products->lastPage(), 1) }}@endif
                 @endif
             </div>
         </div>

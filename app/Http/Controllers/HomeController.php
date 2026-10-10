@@ -64,7 +64,7 @@ class HomeController extends Controller
             }
 
             $orderCol = in_array('last_synced_at', $cols, true) ? 'last_synced_at' : 'id';
-            $products = $query->orderByDesc($orderCol)->simplePaginate(24)->withQueryString();
+            $products = $query->orderByDesc($orderCol)->paginate(24)->withQueryString();
 
             if (in_array('main_category', $cols, true)) {
                 $categories = Product::query()

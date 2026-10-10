@@ -17,6 +17,11 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\XmlFeedController;
 use Illuminate\Support\Facades\Route;
 
+
+Route::get('/ping', function () {
+    return response('ok', 200)->header('Content-Type', 'text/plain');
+});
+
 Route::get('/', [HomeController::class, 'index'])->name('home');
 Route::view('/gizlilik', 'pages.gizlilik')->name('pages.gizlilik');
 Route::view('/mesafeli-satis', 'pages.mesafeli-satis')->name('pages.mesafeli');
