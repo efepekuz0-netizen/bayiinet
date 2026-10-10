@@ -149,6 +149,9 @@ class DealerController extends Controller
             'trendyol_seller_id' => 'nullable|string|max:50',
             'trendyol_api_key' => 'nullable|string|max:255',
             'trendyol_api_secret' => 'nullable|string|max:255',
+            'hepsiburada_merchant_id' => 'nullable|string|max:50',
+            'hepsiburada_username' => 'nullable|string|max:255',
+            'hepsiburada_password' => 'nullable|string|max:255',
             'regenerate_api_key' => 'nullable|boolean',
             'regenerate_xml_token' => 'nullable|boolean',
         ]);
@@ -189,6 +192,26 @@ class DealerController extends Controller
 
         if ($request->boolean('regenerate_api_key')) {
             $update['integration_api_key'] = Str::random(48);
+        }
+
+        
+        // Hepsiburada
+        if (array_key_exists('hepsiburada_merchant_id', $data)) {
+            $update['hepsiburada_merchant_id'] = $data['hepsiburada_merchant_id'] ?: null;
+        }
+        $hbCreds = $dealer->hepsiburada_credentials ?? [];
+        $hbChanged = false;
+        if (! empty($data['hepsiburada_username'] ?? null)) {
+            $hbCreds['username'] = $data['hepsiburada_username'];
+            $hbChanged = true;
+        }
+        if (! empty($data['hepsiburada_password'] ?? null)) {
+            $hbCreds['password'] = $data['hepsiburada_password'];
+            $hbChanged = true;
+        }
+        if ($hbChanged) {
+            $update['hepsiburada_credentials'] = $hbCreds;
+            $update['hepsiburada_last_error'] = null;
         }
 
         if ($request->boolean('regenerate_xml_token')) {

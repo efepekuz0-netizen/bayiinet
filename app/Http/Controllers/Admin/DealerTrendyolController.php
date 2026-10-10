@@ -356,4 +356,53 @@ class DealerTrendyolController extends Controller
     {
         return redirect()->route('admin.dealers.trendyol', $dealer);
     }
+
+
+    public function hepsiburada(Dealer $dealer)
+    {
+        return view('admin.dealers.hepsiburada', compact('dealer'));
+    }
+
+    public function saveHepsiburada(\Illuminate\Http\Request $request, Dealer $dealer): \Illuminate\Http\RedirectResponse
+    {
+        $data = $request->validate([
+            'hepsiburada_merchant_id' => 'required|string|max:50',
+            'hepsiburada_username' => 'nullable|string|max:255',
+            'hepsiburada_password' => 'nullable|string|max:255',
+        ]);
+
+        $existing = $dealer->hepsiburada_credentials ?? [];
+        $user = trim((string) ($data['hepsiburada_username'] ?? '')) ?: ($existing['username'] ?? null);
+        $pass = trim((string) ($data['hepsiburada_password'] ?? '')) ?: ($existing['password'] ?? null);
+
+        if (! $user || ! $pass) {
+            return back()->with('error', 'Hepsiburada kullanıcı adı ve şifre gerekli.');
+        }
+
+        $dealer->update([
+            'hepsiburada_merchant_id' => trim($data['hepsiburada_merchant_id']),
+            'hepsiburada_credentials' => ['username' => $user, 'password' => $pass],
+            'hepsiburada_last_error' => null,
+        ]);
+
+        try {
+            app(\App\Services\HepsiburadaMarketplaceService::class)->testConnection($dealer->fresh());
+            return back()->with('success', 'Hepsiburada bağlantısı kaydedildi ve test başarılı.');
+        } catch (\Throwable $e) {
+            $dealer->update(['hepsiburada_last_error' => $e->getMessage()]);
+            return back()->with('error', 'Kaydedildi ama test başarısız: '.$e->getMessage());
+        }
+    }
+
+    public function testHepsiburada(Dealer $dealer): \Illuminate\Http\RedirectResponse
+    {
+        try {
+            app(\App\Services\HepsiburadaMarketplaceService::class)->testConnection($dealer);
+            $dealer->update(['hepsiburada_last_error' => null]);
+            return back()->with('success', 'Hepsiburada bağlantısı başarılı.');
+        } catch (\Throwable $e) {
+            $dealer->update(['hepsiburada_last_error' => $e->getMessage()]);
+            return back()->with('error', $e->getMessage());
+        }
+    }
 }

@@ -20,8 +20,10 @@ class SendDealerTrendyolBatch implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 300;
+    /** İşçi timeout'undan kısa olmalı (worker 600s). */
+    public int $timeout = 240;
 
+    /** Yeniden deneme yok — hata progress'e yazılır, kuyruk kilidi olmaz. */
     public int $tries = 1;
 
     public int $maxExceptions = 1;
@@ -47,18 +49,15 @@ class SendDealerTrendyolBatch implements ShouldQueue
 
     public function handle(DealerTrendyolService $trendyol): void
     {
-        // "Gönderimi durdur"a basıldıysa kuyruktaki işler kendini atlar.
-        // (Eskiden tüm kuyruk siliniyordu; diğer bayilerin işleri de gidiyordu.)
         if (TrendyolSendProgress::isCancelled($this->dealerId)) {
-            // Parça "işlendi" sayılır, böylece gönderim durumu takılı kalmaz.
             TrendyolSendProgress::addBatch($this->dealerId, 0, 0, 0, [], ['Gönderim durdurulduğu için atlandı.']);
 
             return;
         }
 
         $processed = count($this->productIds);
-
         $dealer = Dealer::query()->find($this->dealerId);
+
         if (! $dealer || ! $dealer->hasTrendyolCredentials()) {
             TrendyolSendProgress::addBatch(
                 $this->dealerId,
@@ -86,16 +85,21 @@ class SendDealerTrendyolBatch implements ShouldQueue
                 $this->attributes,
             );
 
-            // 'created' ve 'pending' sayaçları batch bazlı tutulur
-            // (SendDealerTrendyolCatalog registerBatch ile kaydeder),
-            // burada yalnızca batch'e bağlı olmayan sonuçlar aktarılır.
             $updated = (int) ($result['updated'] ?? 0);
             $failed = (int) ($result['failed'] ?? 0);
-            $errors = array_slice((array) ($result['errors'] ?? []), 0, 8);
+            $errors = array_slice((array) ($result['errors'] ?? []), 0, 12);
             $batches = array_values((array) ($result['batches'] ?? []));
+
+            // accepted ama henüz created değilse "failed" sanılmasın
+            $accepted = (int) ($result['accepted'] ?? 0);
+            $pending = (int) ($result['pending'] ?? 0);
+            if ($accepted > 0 && $failed === $processed && $pending === 0) {
+                // API kabul etti, doğrulama bekliyor
+                $failed = max(0, $processed - $accepted - $updated);
+            }
         } catch (Throwable $e) {
             $failed = $processed;
-            $errors = [mb_substr($e->getMessage(), 0, 200)];
+            $errors = [mb_substr($e->getMessage(), 0, 240)];
             Log::warning('SendDealerTrendyolBatch exception', [
                 'dealer_id' => $this->dealerId,
                 'batch' => $this->batchIndex,
@@ -103,19 +107,25 @@ class SendDealerTrendyolBatch implements ShouldQueue
             ]);
         }
 
-        // Asla exception fırlatma — "attempted too many times" olmasın
-        TrendyolSendProgress::addBatch($this->dealerId, $processed, $updated, $failed, $batches, $errors);
+        try {
+            TrendyolSendProgress::addBatch($this->dealerId, $processed, $updated, $failed, $batches, $errors);
+        } catch (Throwable $e) {
+            Log::error('SendDealerTrendyolBatch progress write failed', ['error' => $e->getMessage()]);
+        }
     }
 
     public function failed(?Throwable $exception): void
     {
-        TrendyolSendProgress::addBatch(
-            $this->dealerId,
-            count($this->productIds),
-            0,
-            count($this->productIds),
-            [],
-            [mb_substr($exception?->getMessage() ?? 'batch failed', 0, 200)],
-        );
+        try {
+            TrendyolSendProgress::addBatch(
+                $this->dealerId,
+                count($this->productIds),
+                0,
+                count($this->productIds),
+                [],
+                [mb_substr($exception?->getMessage() ?? 'Batch başarısız (kuyruk)', 0, 200)],
+            );
+        } catch (Throwable) {
+        }
     }
 }

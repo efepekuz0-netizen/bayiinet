@@ -13,6 +13,9 @@
         <a href="{{ route('admin.dealers.trendyol', $dealer) }}" class="btn btn-outline-primary btn-sm">
             <i class="bi bi-shop me-1"></i> Trendyol'a Ürün Gönder
         </a>
+        <a href="{{ route('admin.dealers.hepsiburada', $dealer) }}" class="btn btn-outline-warning btn-sm">
+            <i class="bi bi-bag me-1"></i> Hepsiburada
+        </a>
         @if($dealer->status === 'pending')
             <form method="POST" action="{{ route('admin.dealers.approve', $dealer) }}">@csrf
                 <button class="btn btn-success btn-sm">Onayla</button>

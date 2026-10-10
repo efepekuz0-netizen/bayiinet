@@ -17,7 +17,7 @@ use Throwable;
  */
 class DealerTrendyolService
 {
-    public const CHUNK_SIZE = 100;
+    public const CHUNK_SIZE = 25;
 
     public function __construct(
         private readonly TrendyolMarketplaceService $api,
@@ -411,8 +411,10 @@ class DealerTrendyolService
             return (int) $genericBrandId;
         }
 
-        // Son çare: yapılandırmadaki genel marka numarası
-        return (int) config('bayiinet.trendyol.fallback_brand_id');
+        // Son çare: yapılandırmadaki genel marka (Diğer)
+        $fb = (int) config('bayiinet.trendyol.fallback_brand_id', 2613880);
+
+        return $fb > 0 ? $fb : 2613880;
     }
 
     /** Hata mesajlarında ürünü tanımlayan kısa etiket. */
@@ -947,24 +949,18 @@ class DealerTrendyolService
     ): array {
         // Trendyol sonucu genelde 2-15 sn içinde hazır olur. Uzun süre bloklamak
         // yerine kısa bir süre bekleyip kalanını VerifyTrendyolBatch'e bırakıyoruz.
-        $deadline = microtime(true) + max(3, (int) config('bayiinet.trendyol.batch_wait_seconds', 9));
+        // Kısa bekleme — uzun poll job'ı kilitler ("attempted too many times").
+        // Asıl doğrulama VerifyTrendyolBatch + recheck ile yapılır.
         $lastError = '';
+        usleep(1500000); // ~1.5 sn
 
-        for ($i = 0; $i < 6; $i++) {
-            usleep($i === 0 ? 1200000 : 3000000); // ilk bekleme ~1.2s, sonra 3'er sn
+        try {
+            $result = $this->applyBatchResult($dealer, $connection, $batchId, $barcodeToListing);
+            $result['pending'] = false;
 
-            try {
-                $result = $this->applyBatchResult($dealer, $connection, $batchId, $barcodeToListing);
-                $result['pending'] = false;
-
-                return $result;
-            } catch (Throwable $e) {
-                $lastError = $e->getMessage();
-            }
-
-            if (microtime(true) >= $deadline) {
-                break;
-            }
+            return $result;
+        } catch (Throwable $e) {
+            $lastError = $e->getMessage();
         }
 
         return [

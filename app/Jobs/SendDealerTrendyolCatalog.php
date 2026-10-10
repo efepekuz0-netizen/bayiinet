@@ -25,7 +25,7 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 300;
+    public int $timeout = 180;
 
     public int $tries = 1;
 
@@ -34,7 +34,7 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
     // Kuyruk kilitli kalırsa (işçi çökmesi vb.) en fazla 10 dk beklenir.
     public int $uniqueFor = 600;
 
-    public const DEFAULT_BATCH_SIZE = 40;
+    public const DEFAULT_BATCH_SIZE = 25;
 
     /**
      * @param  array<int, int>|null  $productIds
@@ -74,12 +74,8 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
             $query = Product::query()
                 ->where('is_active', true)
                 ->where(function ($q) {
-                    $q->where(function ($plain) {
-                        $plain->where('has_variants', false)->where('stock', '>', 0);
-                    })->orWhere(function ($v) {
-                        $v->where('has_variants', true)
-                            ->whereHas('variants', fn ($s) => $s->where('stock', '>', 0));
-                    });
+                    $q->where('stock', '>', 0)
+                        ->orWhere('has_variants', true);
                 })
                 ->orderBy('id');
 

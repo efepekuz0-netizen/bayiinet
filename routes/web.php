@@ -85,6 +85,9 @@ Route::middleware(['auth', 'admin'])
         Route::post('/bayiler/{dealer}/trendyol/sonuc', [AdminDealerTrendyolController::class, 'checkBatch'])->name('dealers.trendyol.batch');
         Route::post('/bayiler/{dealer}/trendyol/sonuc-tumu', [AdminDealerTrendyolController::class, 'recheckBatches'])->name('dealers.trendyol.recheck');
         Route::post('/bayiler/{dealer}/trendyol/fiyat-stok', [AdminDealerTrendyolController::class, 'syncInventory'])->name('dealers.trendyol.inventory');
+        Route::get('/bayiler/{dealer}/hepsiburada', [AdminDealerTrendyolController::class, 'hepsiburada'])->name('dealers.hepsiburada');
+        Route::put('/bayiler/{dealer}/hepsiburada/baglanti', [AdminDealerTrendyolController::class, 'saveHepsiburada'])->name('dealers.hepsiburada.connection');
+        Route::post('/bayiler/{dealer}/hepsiburada/baglanti-kontrol', [AdminDealerTrendyolController::class, 'testHepsiburada'])->name('dealers.hepsiburada.test');
 
         Route::get('/siparisler', [AdminOrderController::class, 'index'])->name('orders.index');
         Route::get('/siparisler/{order}', [AdminOrderController::class, 'show'])->name('orders.show');

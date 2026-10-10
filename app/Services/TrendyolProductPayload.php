@@ -86,7 +86,7 @@ class TrendyolProductPayload
             }
         }
         if ($images === []) {
-            throw new InvalidArgumentException('Trendyol için en az bir https görsel adresi gerekli.');
+            throw new InvalidArgumentException('Görsel yok veya http değil — XML Image alanlarını kontrol edin.');
         }
 
         $description = trim((string) ($d['description'] ?? ''));

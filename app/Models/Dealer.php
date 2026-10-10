@@ -31,6 +31,9 @@ class Dealer extends Model
         'trendyol_seller_id',
         'trendyol_credentials',
         'trendyol_last_error',
+        'hepsiburada_merchant_id',
+        'hepsiburada_credentials',
+        'hepsiburada_last_error',
     ];
 
     protected $hidden = [
@@ -39,6 +42,7 @@ class Dealer extends Model
 
     protected $casts = [
         'trendyol_credentials' => \App\Casts\SafeEncryptedArray::class,
+        'hepsiburada_credentials' => \App\Casts\SafeEncryptedArray::class,
         'balance' => 'decimal:2',
         'default_marketplace_margin' => 'decimal:2',
         'auto_sync_enabled' => 'boolean',
@@ -92,6 +96,15 @@ class Dealer extends Model
         return filled($this->trendyol_seller_id)
             && filled($credentials['api_key'] ?? null)
             && filled($credentials['api_secret'] ?? null);
+    }
+
+    public function hasHepsiburadaCredentials(): bool
+    {
+        $credentials = $this->hepsiburada_credentials ?? [];
+
+        return filled($this->hepsiburada_merchant_id)
+            && filled($credentials['username'] ?? null)
+            && filled($credentials['password'] ?? null);
     }
 
     public function isActive(): bool

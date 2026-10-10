@@ -47,4 +47,8 @@ return [
         'heartbeat_max_delay' => (int) env('AUTOMATION_HEARTBEAT_DELAY', 75),
     ],
 
+
+    'hepsiburada' => [
+        'base_url' => env('HEPSIBURADA_BASE_URL', 'https://mpop.hepsiburada.com'),
+    ],
 ];
