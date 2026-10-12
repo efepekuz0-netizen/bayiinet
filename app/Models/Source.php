@@ -34,6 +34,21 @@ class Source extends Model
         'last_product_count' => 'integer',
     ];
 
+    protected static function booted(): void
+    {
+        static::creating(function (Source $source): void {
+            if ($source->xml_margin_percent === null) {
+                $source->xml_margin_percent = 15;
+            }
+            if ($source->min_margin_percent === null) {
+                $source->min_margin_percent = 5;
+            }
+            if ($source->tax_rate === null) {
+                $source->tax_rate = 20;
+            }
+        });
+    }
+
     public function products(): HasMany
     {
         return $this->hasMany(Product::class);

@@ -29,9 +29,9 @@
                 <input type="number" name="priority" class="form-control" value="{{ old('priority', 10) }}" min="1" max="100">
             </div>
             <div class="row g-2 mb-3">
-                <div class="col-md-4"><label class="form-label">XML kâr %</label><input type="number" step="0.01" min="0" max="500" name="xml_margin_percent" class="form-control" value="{{ old('xml_margin_percent') }}"></div>
-                <div class="col-md-4"><label class="form-label">Minimum kâr %</label><input type="number" step="0.01" min="0" max="500" name="min_margin_percent" class="form-control" value="{{ old('min_margin_percent') }}"></div>
-                <div class="col-md-4"><label class="form-label">XML KDV %</label><input type="number" step="0.01" min="0" max="100" name="tax_rate" class="form-control" value="{{ old('tax_rate') }}"></div>
+                <div class="col-md-4"><label class="form-label">XML kâr %</label><input type="number" step="0.01" min="0" max="500" name="xml_margin_percent" class="form-control" value="{{ old('xml_margin_percent', 15) }}"></div>
+                <div class="col-md-4"><label class="form-label">Minimum kâr %</label><input type="number" step="0.01" min="0" max="500" name="min_margin_percent" class="form-control" value="{{ old('min_margin_percent', 5) }}"></div>
+                <div class="col-md-4"><label class="form-label">XML KDV %</label><input type="number" step="0.01" min="0" max="100" name="tax_rate" class="form-control" value="{{ old('tax_rate', 20) }}"></div>
             </div>
             <div class="form-check mb-3"><input type="checkbox" name="prices_include_tax" value="1" class="form-check-input" id="includeTax"><label class="form-check-label" for="includeTax">XML alış fiyatları KDV dahil</label></div>
             <button type="submit" class="btn btn-primary">Kaydet</button>

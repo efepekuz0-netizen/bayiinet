@@ -84,6 +84,18 @@ class SourceController extends Controller
         $data['priority'] = $data['priority'] ?? 10;
         $data['prices_include_tax'] = $request->boolean('prices_include_tax');
 
+        // Varsayılan kâr: boş bırakılırsa %15 (manuel girilirse o değer kullanılır)
+        $pricing = app(\App\Services\PricingService::class);
+        if (! isset($data['xml_margin_percent']) || $data['xml_margin_percent'] === null || $data['xml_margin_percent'] === '') {
+            $data['xml_margin_percent'] = $pricing->defaultXmlMargin() ?: 15;
+        }
+        if (! isset($data['min_margin_percent']) || $data['min_margin_percent'] === null || $data['min_margin_percent'] === '') {
+            $data['min_margin_percent'] = $pricing->defaultMinMargin() ?: 5;
+        }
+        if (! isset($data['tax_rate']) || $data['tax_rate'] === null || $data['tax_rate'] === '') {
+            $data['tax_rate'] = 20;
+        }
+
         Source::create($data);
 
         return redirect()->route('admin.sources.index')->with('success', 'Kaynak oluşturuldu.');
