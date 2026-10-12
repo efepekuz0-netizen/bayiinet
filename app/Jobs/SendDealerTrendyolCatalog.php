@@ -97,7 +97,7 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
             $total = count($ids);
 
             if ($total === 0) {
-                TrendyolSendProgress::fail($this->dealerId, 'Gönderilecek yeni ürün yok (hepsi zaten Trendyol'da veya stok yok).');
+                TrendyolSendProgress::fail($this->dealerId, "Gonderilecek yeni urun yok (hepsi zaten Trendyol da veya stok yok).");
 
                 return;
             }
