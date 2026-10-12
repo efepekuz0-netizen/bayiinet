@@ -18,16 +18,15 @@ php artisan bayiinet:ensure-admin || true
 php artisan queue:flush 2>/dev/null || true
 php artisan queue:prune-failed --hours=0 2>/dev/null || true
 
-# Job timeout 45s → worker timeout 60s (< retry_after 960)
-# Döngü: worker ölürse / max-time dolunca yeniden başlar
+# Masaüstü tarzı job timeout 600s → worker timeout 620, retry_after 960
 (
   while true; do
     php artisan queue:work database \
       --queue=marketplace,default \
-      --max-time=90 \
-      --timeout=60 \
+      --max-time=300 \
+      --timeout=620 \
       --tries=1 \
-      --memory=384 \
+      --memory=512 \
       --sleep=2 || true
     sleep 2
   done

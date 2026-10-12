@@ -184,33 +184,51 @@ class DealerTrendyolController extends Controller
         // Önceki gönderimden kalan benzersiz iş kilidini serbest bırak (en iyi çaba)
         try {
             Cache::lock('laravel_unique_job:trendyol-send-'.$dealer->id)->forceRelease();
+            Cache::lock('laravel_unique_job:trendyol-run-'.$dealer->id)->forceRelease();
         } catch (\Throwable) {
         }
 
         // Sayfa anında dönsün — gönderim kuyrukta
         TrendyolSendProgress::queued($dealer->id, $countHint.' ürün kuyruğa alındı…');
 
-        // Kategori/marka boş olabilir → XML kaynağı varsayılanı + otomatik eşleme
-        SendDealerTrendyolCatalog::dispatch(
-            $dealer->id,
-            $sendAll ? null : $productIds,
-            $categoryId,
-            $brandId,
-            $attributes,
-            false,
-        );
+        // Marka formda veya herhangi bir XML kaynağında tanımlıysa masaüstü hızı (100'lük paket, tek iş)
+        $hasBrand = $brandId > 0 || \App\Models\Source::query()
+            ->whereNotNull('default_trendyol_brand_id')
+            ->where('default_trendyol_brand_id', '>', 0)
+            ->exists();
 
-        // Render'da background worker ölebiliyor: yanıt sonrası kuyruğu kendimiz tüket.
+        if ($hasBrand) {
+            \App\Jobs\SendDealerTrendyolRun::dispatch(
+                $dealer->id,
+                $sendAll ? null : $productIds,
+                $categoryId > 0 ? $categoryId : null,
+                $brandId > 0 ? $brandId : null,
+                $attributes,
+            );
+            $mode = 'masaustu hiz (100 urun/paket)';
+        } else {
+            \App\Jobs\SendDealerTrendyolCatalog::dispatch(
+                $dealer->id,
+                $sendAll ? null : $productIds,
+                $categoryId > 0 ? $categoryId : null,
+                $brandId > 0 ? $brandId : null,
+                $attributes,
+                false,
+            );
+            $mode = 'guvenli mod (5 urun/paket) — XML kaynagina Marka No ekleyerek hizlanir';
+        }
+
+        // Yanıt sonrası kuyruk tüket (Render worker ölürse bile ilk paketler işlensin)
         dispatch(function () {
             try {
-                for ($i = 0; $i < 8; $i++) {
+                for ($i = 0; $i < 3; $i++) {
                     \Illuminate\Support\Facades\Artisan::call('queue:work', [
                         'connection' => 'database',
                         '--queue' => 'marketplace',
                         '--once' => true,
                         '--tries' => 1,
-                        '--timeout' => 55,
-                        '--memory' => 256,
+                        '--timeout' => 120,
+                        '--memory' => 384,
                     ]);
                 }
             } catch (\Throwable $e) {
@@ -218,19 +236,20 @@ class DealerTrendyolController extends Controller
             }
         })->afterResponse();
 
-        $n = $sendAll ? 'tüm stoklu ürünler' : (count($productIds).' ürün');
+        $n = $sendAll ? 'tum stoklu urunler' : (count($productIds).' urun');
 
-        AdminAudit::log('trendyol.send', $dealer->company_name.' için '.$n.' Trendyol gönderim kuyruğuna alındı.', [
+        AdminAudit::log('trendyol.send', $dealer->company_name.' icin '.$n.' Trendyol kuyruga alindi.', [
             'dealer_id' => $dealer->id,
             'send_all' => $sendAll,
             'product_ids' => $sendAll ? null : $productIds,
             'category_id' => $categoryId,
             'brand_id' => $brandId,
+            'mode' => $mode,
         ]);
 
         return $this->back($dealer)->with(
             'success',
-            $n.' kuyruğa alındı. Kategori/marka sabit; 5\'er ürün işleniyor. Sayfa 15 sn sonra yenilenir — "Gönderildi olanları kontrol et" ile doğrulayın.'
+            $n.' kuyruga alindi · '.$mode.'. Sayfa yenilenince ilerlemeyi gorursunuz.'
         );
     }
 
@@ -250,6 +269,7 @@ class DealerTrendyolController extends Controller
         // Benzersiz iş kilidi serbest (en iyi çaba)
         try {
             Cache::lock('laravel_unique_job:trendyol-send-'.$dealer->id)->forceRelease();
+            Cache::lock('laravel_unique_job:trendyol-run-'.$dealer->id)->forceRelease();
         } catch (\Throwable) {
         }
 
@@ -430,6 +450,7 @@ class DealerTrendyolController extends Controller
         \App\Services\TrendyolSendProgress::cancel($dealer->id, 'Kuyruk sıfırlandı.');
         try {
             \Illuminate\Support\Facades\Cache::lock('laravel_unique_job:trendyol-send-'.$dealer->id)->forceRelease();
+            Cache::lock('laravel_unique_job:trendyol-run-'.$dealer->id)->forceRelease();
         } catch (\Throwable) {
         }
         try {

@@ -523,7 +523,7 @@ class DealerTrendyolService
         $batches = [];
         $updated = 0;
 
-        foreach (array_chunk($readyCreate, 10) as $chunk) {
+        foreach (array_chunk($readyCreate, 100) as $chunk) {
             $items = array_column($chunk, 'item');
             $listingIds = array_map(fn ($r) => $r['listing']->id, $chunk);
             try {
