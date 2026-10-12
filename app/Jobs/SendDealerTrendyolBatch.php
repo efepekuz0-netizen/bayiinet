@@ -13,12 +13,6 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
-/**
- * Küçük ürün paketi gönderir. Asla kuyruğu kilitlemez:
- * - kısa timeout
- * - exception fırlatmaz
- * - "attempted too many times" üretmez (tries yüksek, handle içinde yakalama)
- */
 class SendDealerTrendyolBatch implements ShouldQueue
 {
     use Dispatchable;
@@ -26,18 +20,14 @@ class SendDealerTrendyolBatch implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 90;
+    /** Render worker için güvenli üst sınır */
+    public int $timeout = 45;
 
-    public int $tries = 3;
+    public int $tries = 1;
 
-    public int $maxExceptions = 3;
+    public int $maxExceptions = 1;
 
     public bool $failOnTimeout = false;
-
-    public function backoff(): array
-    {
-        return [5, 15, 30];
-    }
 
     /**
      * @param  array<int, int>  $productIds
@@ -49,8 +39,8 @@ class SendDealerTrendyolBatch implements ShouldQueue
         public ?int $categoryId,
         public ?int $brandId,
         public array $attributes,
-        public int $batchIndex,
-        public int $totalBatches,
+        public int $batchIndex = 1,
+        public int $totalBatches = 1,
     ) {
         $this->onConnection('database');
         $this->onQueue('marketplace');
@@ -81,7 +71,7 @@ class SendDealerTrendyolBatch implements ShouldQueue
                 return;
             }
 
-            $result = $trendyol->send(
+            $result = $trendyol->sendFast(
                 $dealer,
                 $this->productIds,
                 $this->categoryId,
@@ -89,60 +79,41 @@ class SendDealerTrendyolBatch implements ShouldQueue
                 $this->attributes,
             );
 
-            $updated = (int) ($result['updated'] ?? 0);
+            $sent = (int) ($result['accepted'] ?? 0) + (int) ($result['updated'] ?? 0);
             $failed = (int) ($result['failed'] ?? 0);
-            $accepted = (int) ($result['accepted'] ?? 0);
-            $pending = (int) ($result['pending'] ?? 0);
-            $errors = array_values(array_slice((array) ($result['errors'] ?? []), 0, 15));
+            $errors = array_values(array_slice((array) ($result['errors'] ?? []), 0, 20));
             $batches = array_values((array) ($result['batches'] ?? []));
-
-            // API kabul ettiyse "hepsi hatalı" gösterme
-            if ($accepted > 0 || $pending > 0) {
-                $failed = max(0, $processed - $accepted - $updated - $pending);
-            }
 
             TrendyolSendProgress::addBatch(
                 $this->dealerId,
                 $processed,
-                $updated + $accepted,
+                $sent,
                 $failed,
                 $batches,
                 $errors,
             );
         } catch (Throwable $e) {
-            Log::warning('SendDealerTrendyolBatch soft-fail', [
+            Log::warning('SendDealerTrendyolBatch', [
                 'dealer_id' => $this->dealerId,
-                'batch' => $this->batchIndex,
-                'attempt' => $this->attempts(),
                 'error' => $e->getMessage(),
             ]);
-
-            // Son denemede progress'e yaz; ortada exception fırlatma → "attempted too many times" olmaz
-            if ($this->attempts() >= $this->tries) {
-                TrendyolSendProgress::addBatch(
-                    $this->dealerId,
-                    $processed,
-                    0,
-                    $processed,
-                    [],
-                    [mb_substr($e->getMessage(), 0, 220)],
-                );
-
-                return;
-            }
-
-            // Ara deneme: kısa bekle, yeniden dene
-            $this->release(10);
+            TrendyolSendProgress::addBatch(
+                $this->dealerId,
+                $processed,
+                0,
+                $processed,
+                [],
+                [mb_substr($e->getMessage(), 0, 220)],
+            );
         }
     }
 
     public function failed(?Throwable $exception): void
     {
         try {
-            $msg = $exception?->getMessage() ?? 'Bilinmeyen kuyruk hatası';
-            // Kullanıcıya anlamsız "attempted too many times" yerine net metin
+            $msg = $exception?->getMessage() ?? 'Parça işlenemedi';
             if (str_contains(mb_strtolower($msg), 'attempted too many')) {
-                $msg = 'Bu parça zaman aşımına uğradı veya işçi yeniden başladı. Tekrar gönderim deneyin; daha küçük paketlerle devam edilecek.';
+                $msg = 'Parça zaman aşımı veya işçi yeniden başladı. Kuyruğu sıfırlayıp tekrar gönderin; kategori+marka dolu olsun.';
             }
             TrendyolSendProgress::addBatch(
                 $this->dealerId,

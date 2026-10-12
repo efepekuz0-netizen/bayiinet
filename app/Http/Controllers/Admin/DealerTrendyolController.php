@@ -190,14 +190,39 @@ class DealerTrendyolController extends Controller
         // Sayfa anında dönsün — gönderim kuyrukta
         TrendyolSendProgress::queued($dealer->id, $countHint.' ürün kuyruğa alındı…');
 
+        if ($categoryId <= 0 || $brandId <= 0) {
+            return $this->back($dealer)->with(
+                'error',
+                'Zaman aşımını önlemek için Trendyol Kategori No ve Marka No zorunlu. Formdaki alanları doldurup kaydedin, sonra tekrar gönderin.'
+            );
+        }
+
         SendDealerTrendyolCatalog::dispatch(
             $dealer->id,
             $sendAll ? null : $productIds,
-            $categoryId > 0 ? $categoryId : null,
-            $brandId > 0 ? $brandId : null,
+            $categoryId,
+            $brandId,
             $attributes,
             false,
         );
+
+        // Render'da background worker ölebiliyor: yanıt sonrası kuyruğu kendimiz tüket.
+        dispatch(function () {
+            try {
+                for ($i = 0; $i < 8; $i++) {
+                    \Illuminate\Support\Facades\Artisan::call('queue:work', [
+                        'connection' => 'database',
+                        '--queue' => 'marketplace',
+                        '--once' => true,
+                        '--tries' => 1,
+                        '--timeout' => 55,
+                        '--memory' => 256,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('trendyol afterResponse drain', ['e' => $e->getMessage()]);
+            }
+        })->afterResponse();
 
         $n = $sendAll ? 'tüm stoklu ürünler' : (count($productIds).' ürün');
 
@@ -205,13 +230,13 @@ class DealerTrendyolController extends Controller
             'dealer_id' => $dealer->id,
             'send_all' => $sendAll,
             'product_ids' => $sendAll ? null : $productIds,
-            'category_id' => $categoryId > 0 ? $categoryId : null,
-            'brand_id' => $brandId > 0 ? $brandId : null,
+            'category_id' => $categoryId,
+            'brand_id' => $brandId,
         ]);
 
         return $this->back($dealer)->with(
             'success',
-            $n.' Trendyol kuyruğuna alındı. İşlem arka planda sürer; birkaç dakika sonra Sonuç sorgula veya durum kutusunu kontrol edin.'
+            $n.' kuyruğa alındı. Kategori/marka sabit; 5\'er ürün işleniyor. Sayfa 15 sn sonra yenilenir — "Gönderildi olanları kontrol et" ile doğrulayın.'
         );
     }
 

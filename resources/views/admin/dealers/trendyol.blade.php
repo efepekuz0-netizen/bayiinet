@@ -1,6 +1,12 @@
 @extends('layouts.app')
 @section('title', $dealer->company_name.' · Trendyol')
 @section('content')
+
+    <div class="alert alert-info small">
+        <strong>Hızlı gönderim için:</strong> Marka No ve Kategori No alanlarını doldurun (zorunlu özellikler otomatik dolar).
+        Takılırsa <em>Kuyruğu sıfırla</em> → tekrar gönder. Parça boyutu 5 ürün; işlem arka planda sürer.
+    </div>
+
 @if(!empty($sendStatus) && ($sendStatus['status'] ?? 'idle') !== 'idle')
     @php
         $st = $sendStatus['status'] ?? 'idle';

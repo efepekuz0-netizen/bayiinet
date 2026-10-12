@@ -14,9 +14,6 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
-/**
- * Orchestrator: ürün id listesini toplar, küçük batch job'lara böler, hemen biter.
- */
 class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable;
@@ -24,18 +21,15 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 120;
+    public int $timeout = 60;
 
-    public int $tries = 2;
+    public int $tries = 1;
 
-    public int $maxExceptions = 2;
-
-    public int $uniqueFor = 300;
+    public int $uniqueFor = 180;
 
     public bool $failOnTimeout = false;
 
-    /** Render tek işçi için güvenli paket boyutu */
-    public const DEFAULT_BATCH_SIZE = 10;
+    public const DEFAULT_BATCH_SIZE = 5;
 
     /**
      * @param  array<int, int>|null  $productIds
@@ -87,12 +81,12 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
             $total = count($ids);
 
             if ($total === 0) {
-                TrendyolSendProgress::fail($this->dealerId, 'Gönderilecek stoklu ürün bulunamadı.');
+                TrendyolSendProgress::fail($this->dealerId, 'Gönderilecek stoklu ürün yok.');
 
                 return;
             }
 
-            $batchSize = max(5, min(15, (int) config('bayiinet.trendyol.batch_size', self::DEFAULT_BATCH_SIZE)));
+            $batchSize = 5;
             $chunks = array_chunk($ids, $batchSize);
             $totalBatches = count($chunks);
 
@@ -100,15 +94,10 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
                 $this->dealerId,
                 $total,
                 $totalBatches,
-                "0 / {$total} kuyruğa alındı · {$totalBatches} parça"
+                "0 / {$total} · {$totalBatches} parça (5'er ürün)"
             );
 
             foreach ($chunks as $index => $chunk) {
-                if (TrendyolSendProgress::isCancelled($this->dealerId)) {
-                    break;
-                }
-
-                // İşçiyi boğmamak için parçalar arası gecikme
                 SendDealerTrendyolBatch::dispatch(
                     $this->dealerId,
                     $chunk,
@@ -117,30 +106,21 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
                     $this->attributes,
                     $index + 1,
                     $totalBatches,
-                )->delay(now()->addSeconds($index * 3));
+                )->delay(now()->addSeconds($index * 2));
             }
 
-            Log::info('SendDealerTrendyolCatalog dispatched', [
-                'dealer_id' => $dealer->id,
+            Log::info('Trendyol catalog queued', [
+                'dealer_id' => $this->dealerId,
                 'total' => $total,
                 'batches' => $totalBatches,
-                'batch_size' => $batchSize,
             ]);
         } catch (Throwable $e) {
-            TrendyolSendProgress::fail($this->dealerId, 'Gönderim başlatılamadı: '.$e->getMessage());
-            Log::error('SendDealerTrendyolCatalog failed', [
-                'dealer_id' => $this->dealerId,
-                'error' => $e->getMessage(),
-            ]);
+            TrendyolSendProgress::fail($this->dealerId, $e->getMessage());
         }
     }
 
     public function failed(?Throwable $exception): void
     {
-        $msg = $exception?->getMessage() ?? 'Orchestrator başarısız';
-        if (str_contains(mb_strtolower($msg), 'attempted too many')) {
-            $msg = 'Gönderim orchestrator zaman aşımı. Tekrar deneyin.';
-        }
-        TrendyolSendProgress::fail($this->dealerId, $msg);
+        TrendyolSendProgress::fail($this->dealerId, $exception?->getMessage() ?? 'Orchestrator hata');
     }
 }

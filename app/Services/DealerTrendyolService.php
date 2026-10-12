@@ -355,6 +355,225 @@ class DealerTrendyolService
      * @param  iterable<Product>  $products
      * @return array<string, int|null>
      */
+
+    /**
+     * Hızlı gönderim: kategori+marka verilmişse ek API yok.
+     * Kuyruk timeout'unu önlemek için tasarlandı.
+     *
+     * @param  array<int, int>  $productIds
+     * @param  array<int, array<string, mixed>>  $attributes
+     * @return array{accepted: int, created: int, pending: int, updated: int, failed: int, batches: array<int, string>, errors: array<int, string>}
+     */
+    public function sendFast(
+        Dealer $dealer,
+        array $productIds,
+        ?int $categoryId = null,
+        ?int $brandId = null,
+        array $attributes = [],
+    ): array {
+        // Varsayılan marka/kategori yoksa klasik send (daha yavaş ama eşlemeli)
+        if (! $categoryId || $categoryId <= 0 || ! $brandId || $brandId <= 0) {
+            return $this->send($dealer, $productIds, $categoryId, $brandId, $attributes);
+        }
+
+        $connection = $this->connection($dealer);
+        $margin = $this->dealerMargin($dealer);
+        $products = Product::query()->with('variants')->whereIn('id', $productIds)->get();
+
+        $failed = 0;
+        $errors = [];
+        $readyCreate = [];
+        $readyUpdate = [];
+        $attrCache = [];
+
+        $existingListings = DealerTrendyolListing::query()
+            ->where('dealer_id', $dealer->id)
+            ->whereIn(
+                'barcode',
+                $products->flatMap(function (Product $p) {
+                    $codes = [];
+                    if ($p->has_variants && $p->variants->isNotEmpty()) {
+                        foreach ($p->variants as $v) {
+                            $b = TrendyolProductPayload::cleanBarcode((string) ($v->barcode ?: $v->stock_code ?: ''));
+                            if ($b !== '') {
+                                $codes[] = $b;
+                            }
+                        }
+                    } else {
+                        $b = TrendyolProductPayload::cleanBarcode((string) ($p->barcode ?: $p->stock_code ?: ''));
+                        if ($b !== '') {
+                            $codes[] = $b;
+                        }
+                    }
+
+                    return $codes;
+                })->unique()->values()->all() ?: ['__none__']
+            )
+            ->get()
+            ->keyBy(fn (DealerTrendyolListing $l) => (string) $l->barcode);
+
+        foreach ($products as $product) {
+            $variants = ($product->has_variants && $product->variants->isNotEmpty())
+                ? $product->variants
+                : [null];
+
+            foreach ($variants as $variant) {
+                try {
+                    $barcode = TrendyolProductPayload::cleanBarcode((string) (
+                        $variant?->barcode
+                        ?: $variant?->stock_code
+                        ?: $product->barcode
+                        ?: $product->stock_code
+                        ?: ''
+                    ));
+                    if ($barcode === '') {
+                        $failed++;
+                        $errors[] = $this->label($product).': barkod yok';
+                        continue;
+                    }
+
+                    $sale = $this->salePrice($product, $variant, $margin);
+                    if ($sale <= 0) {
+                        $failed++;
+                        $errors[] = $this->label($product).': satış fiyatı 0';
+                        continue;
+                    }
+
+                    $qty = $this->quantityFor($product, $variant);
+                    $existing = $existingListings->get($barcode);
+                    $alreadyOnTy = $existing && in_array($existing->status, ['sent', 'created'], true);
+
+                    $listingData = [
+                        'product_id' => $product->id,
+                        'product_variant_id' => $variant?->id,
+                        'sale_price' => $sale,
+                        'list_price' => max((float) ($product->list_price ?? 0), $sale),
+                        'quantity' => $qty,
+                        'category_id' => $categoryId,
+                        'brand_id' => $brandId,
+                        'status' => $alreadyOnTy ? $existing->status : 'pending',
+                        'error' => null,
+                    ];
+
+                    if ($existing === null) {
+                        $listing = DealerTrendyolListing::create(
+                            ['dealer_id' => $dealer->id, 'barcode' => $barcode] + $listingData
+                        );
+                        $existingListings->put($barcode, $listing);
+                    } else {
+                        $existing->update($listingData);
+                        $listing = $existing;
+                    }
+
+                    if ($alreadyOnTy) {
+                        $readyUpdate[] = [
+                            'listing' => $listing,
+                            'item' => [
+                                'barcode' => $barcode,
+                                'quantity' => $qty,
+                                'salePrice' => $sale,
+                                'listPrice' => max((float) ($product->list_price ?? 0), $sale),
+                            ],
+                        ];
+                        continue;
+                    }
+
+                    $productAttrs = $attributes !== []
+                        ? $attributes
+                        : ($this->attributesForCategory(
+                            $connection,
+                            $categoryId,
+                            $attrCache,
+                            (string) ($product->title ?? ''),
+                            (string) ($product->description ?? ''),
+                            (string) ($product->category_path ?? ''),
+                        ) ?? []);
+
+                    $readyCreate[] = [
+                        'listing' => $listing,
+                        'item' => TrendyolProductPayload::item([
+                            'barcode' => $barcode,
+                            'stock_code' => $product->stock_code,
+                            'title' => $this->titleFor($product, $variant),
+                            'description' => $product->description,
+                            'images' => (array) ($product->images ?? []),
+                            'quantity' => $qty,
+                            'sale_price' => $sale,
+                            'list_price' => max((float) ($product->list_price ?? 0), $sale),
+                            'vat_rate' => $product->tax_rate ?: 20,
+                            'desi' => $product->desi,
+                            'category_id' => $categoryId,
+                            'brand_id' => $brandId,
+                            'attributes' => $productAttrs,
+                        ]),
+                    ];
+                } catch (Throwable $e) {
+                    $failed++;
+                    $errors[] = $this->label($product).': '.$e->getMessage();
+                }
+            }
+        }
+
+        $accepted = 0;
+        $batches = [];
+        $updated = 0;
+
+        foreach (array_chunk($readyCreate, 10) as $chunk) {
+            $items = array_column($chunk, 'item');
+            $listingIds = array_map(fn ($r) => $r['listing']->id, $chunk);
+            try {
+                $response = $this->api->createProducts($connection, $items);
+                $batchId = (string) ($response['batchRequestId'] ?? '');
+                if ($batchId === '') {
+                    $failed += count($chunk);
+                    $errors[] = 'Trendyol batchRequestId dönmedi';
+                    DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
+                        'status' => 'failed',
+                        'error' => 'batchRequestId yok',
+                    ]);
+                    continue;
+                }
+                DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
+                    'status' => 'sent',
+                    'batch_request_id' => $batchId,
+                    'error' => null,
+                    'sent_at' => now(),
+                ]);
+                $accepted += count($chunk);
+                $batches[] = $batchId;
+                TrendyolSendProgress::registerBatch($dealer->id, $batchId, count($chunk));
+                \App\Jobs\VerifyTrendyolBatch::dispatch($dealer->id, $batchId)->delay(now()->addSeconds(20));
+            } catch (Throwable $e) {
+                $failed += count($chunk);
+                $errors[] = mb_substr($e->getMessage(), 0, 200);
+                DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
+                    'status' => 'failed',
+                    'error' => mb_substr($e->getMessage(), 0, 1000),
+                ]);
+            }
+        }
+
+        foreach (array_chunk($readyUpdate, 50) as $chunk) {
+            try {
+                $this->api->updatePriceAndInventory($connection, array_column($chunk, 'item'));
+                $updated += count($chunk);
+            } catch (Throwable $e) {
+                $failed += count($chunk);
+                $errors[] = 'Fiyat/stok: '.mb_substr($e->getMessage(), 0, 120);
+            }
+        }
+
+        return [
+            'pending' => $accepted,
+            'accepted' => $accepted,
+            'created' => 0,
+            'updated' => $updated,
+            'failed' => $failed,
+            'batches' => $batches,
+            'errors' => array_slice($errors, 0, 25),
+        ];
+    }
+
     private function resolveBrandIds(MarketplaceConnection $connection, iterable $products, ?int $genericBrandId): array
     {
         $names = [];
