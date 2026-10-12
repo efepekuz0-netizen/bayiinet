@@ -247,6 +247,29 @@ class TrendyolSendProgress
     }
 
     /**
+     * Gönderim "sürüyor" görünüyor ama uzun süredir güncellenmedi mi?
+     *
+     * Konteyner yeniden başlarsa (Render dağıtımı / uyku) iş yarıda kalır ve
+     * durum 'running' olarak asılı kalırdı; bu yüzden saatlik senkron o bayiyi
+     * 12 saat boyunca atlıyordu. Bu kontrol sayesinde yarım kalan tur
+     * `$minutes` sonra yeni turla devam eder.
+     */
+    public static function isStale(int $dealerId, int $minutes = 45): bool
+    {
+        $updatedAt = (string) (self::get($dealerId)['updated_at'] ?? '');
+
+        if ($updatedAt === '') {
+            return true;
+        }
+
+        try {
+            return now()->diffInMinutes(new \DateTimeImmutable($updatedAt)) >= $minutes;
+        } catch (\Throwable) {
+            return true;
+        }
+    }
+
+    /**
      * @param  callable(array<string,mixed>): array<string,mixed>  $callback
      */
     protected static function write(int $dealerId, callable $callback, ?string $message = null): void

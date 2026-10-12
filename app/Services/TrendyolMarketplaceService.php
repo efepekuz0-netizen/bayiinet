@@ -42,10 +42,13 @@ class TrendyolMarketplaceService
      */
     public function createProducts(MarketplaceConnection $connection, array $items): array
     {
+        // 100-1000 kalemlik paketler 20 sn'yi aşabiliyor: batch uçlarına
+        // daha cömert zaman aşımı veriyoruz (aksi hâlde "cURL error 28").
         return $this->post(
             $connection,
             $this->productPath($connection).'/v2/products',
             ['items' => array_values($items)],
+            $this->batchTimeout(),
         );
     }
 
@@ -55,7 +58,13 @@ class TrendyolMarketplaceService
             $connection,
             '/integration/inventory/sellers/'.rawurlencode($connection->account_id).'/products/price-and-inventory',
             ['items' => $items],
+            $this->batchTimeout(),
         );
+    }
+
+    private function batchTimeout(): int
+    {
+        return max(20, (int) config('bayiinet.trendyol.batch_timeout', 60));
     }
 
     /**
@@ -245,9 +254,9 @@ class TrendyolMarketplaceService
         return $this->send($connection, 'GET', $path, $query);
     }
 
-    private function post(MarketplaceConnection $connection, string $path, array $payload): array
+    private function post(MarketplaceConnection $connection, string $path, array $payload, ?int $timeout = null): array
     {
-        return $this->send($connection, 'POST', $path, $payload);
+        return $this->send($connection, 'POST', $path, $payload, timeout: $timeout);
     }
 
     private function put(MarketplaceConnection $connection, string $path, array $payload): array
@@ -261,6 +270,7 @@ class TrendyolMarketplaceService
         string $path,
         array $data = [],
         bool $allowEmptyResponse = false,
+        ?int $timeout = null,
     ): array {
         $credentials = $connection->credentials ?? [];
         $apiKey = $credentials['api_key'] ?? null;
@@ -273,8 +283,8 @@ class TrendyolMarketplaceService
         $request = Http::withBasicAuth($apiKey, $apiSecret)
             ->withHeaders(['User-Agent' => $connection->account_id.' - SelfIntegration'])
             ->acceptJson()
-            ->connectTimeout(5)
-            ->timeout(20)
+            ->connectTimeout(10)
+            ->timeout($timeout ?? (int) config('bayiinet.trendyol.http_timeout', 20))
             ->withoutRedirecting()
             // Yalnızca ağ/bağlantı hatalarında yeniden dener (429 ve 5xx için
             // çağıran taraf kendi bekleme stratejisini uygular).

@@ -13,6 +13,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -48,6 +49,7 @@ class SendDealerTrendyolRun implements ShouldQueue, ShouldBeUnique
         public ?int $categoryId = null,
         public ?int $brandId = null,
         public array $attributes = [],
+        public bool $automated = false,
     ) {
         $this->onConnection('database');
         $this->onQueue('marketplace');
@@ -86,18 +88,22 @@ class SendDealerTrendyolRun implements ShouldQueue, ShouldBeUnique
             $ids = $query->pluck('id')->map(fn ($id) => (int) $id)->all();
 
             if ($ids !== []) {
-                $already = DealerTrendyolListing::query()
-                    ->where('dealer_id', $this->dealerId)
-                    ->where('status', 'created')
-                    ->whereIn('product_id', $ids)
-                    ->pluck('product_id')
-                    ->map(fn ($id) => (int) $id)
-                    ->all();
-                $ids = array_values(array_diff($ids, $already));
+                // "Tamamı Trendyol'da" olan ürünleri atla.
+                // ÖNEMLİ: varyantlı üründe yalnızca BİR varyant gönderilmişse
+                // ürün atlanmamalı; eksik varyantların da gönderilmesi gerekir.
+                $ids = array_values(array_diff($ids, $this->alreadyCoveredProductIds($ids)));
             }
 
             $total = count($ids);
             if ($total === 0) {
+                if ($this->automated) {
+                    Log::info('SendDealerTrendyolRun: gonderilecek yeni urun yok', [
+                        'dealer_id' => $this->dealerId,
+                    ]);
+
+                    return;
+                }
+
                 TrendyolSendProgress::fail($this->dealerId, 'Gonderilecek yeni urun yok.');
 
                 return;
@@ -178,9 +184,65 @@ class SendDealerTrendyolRun implements ShouldQueue, ShouldBeUnique
                     usleep(200000); // 0.2 sn
                 }
             }
+
+            if ($this->automated) {
+                // Saatlik otomatik tur: panelde "gönderim sürüyor" kalmasın.
+                TrendyolSendProgress::finish(
+                    $this->dealerId,
+                    "Otomatik tur bitti: {$total} urun tarandi."
+                );
+            }
         } catch (Throwable $e) {
             TrendyolSendProgress::fail($this->dealerId, $e->getMessage());
         }
+    }
+
+    /**
+     * Gönderilecek yeni bir şeyi olmayan ürünler: varyantsızda barkod,
+     * varyantlıda TÜM varyantlar zaten Trendyol'a iletilmiş ('created'/'sent').
+     *
+     * @param  array<int, int>  $ids
+     * @return array<int, int>
+     */
+    private function alreadyCoveredProductIds(array $ids): array
+    {
+        $variantCovered = DB::table('dealer_trendyol_listings')
+            ->where('dealer_id', $this->dealerId)
+            ->whereIn('product_id', $ids)
+            ->whereIn('status', ['created', 'sent'])
+            ->whereNotNull('product_variant_id')
+            ->groupBy('product_id')
+            ->selectRaw('product_id, count(distinct product_variant_id) as covered')
+            ->pluck('covered', 'product_id');
+
+        $plainCovered = DB::table('dealer_trendyol_listings')
+            ->where('dealer_id', $this->dealerId)
+            ->whereIn('product_id', $ids)
+            ->whereIn('status', ['created', 'sent'])
+            ->whereNull('product_variant_id')
+            ->distinct()
+            ->pluck('product_id')
+            ->all();
+
+        $variantCounts = DB::table('product_variants')
+            ->whereIn('product_id', $ids)
+            ->groupBy('product_id')
+            ->selectRaw('product_id, count(*) as total')
+            ->pluck('total', 'product_id');
+
+        $covered = [];
+        foreach ($plainCovered as $productId) {
+            $covered[(int) $productId] = true;
+        }
+
+        foreach ($variantCovered as $productId => $count) {
+            $needed = (int) ($variantCounts[$productId] ?? 0);
+            if ($needed > 0 && (int) $count >= $needed) {
+                $covered[(int) $productId] = true;
+            }
+        }
+
+        return array_map('intval', array_keys($covered));
     }
 
     public function failed(?Throwable $exception): void

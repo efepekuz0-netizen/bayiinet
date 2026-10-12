@@ -1,0 +1,130 @@
+# ---------------------------------------------------------------------------
+# Bayiinet — Render Blueprint (önerilen kurulum)
+#
+# Bu dosya ile Render'da üç servis birden oluşur:
+#   1) bayiinet-web      → panel + HTTP (Web Service)
+#   2) bayiinet-worker   → kuyruk işçisi (Background Worker, ÜCRETLİ plan)
+#   3) bayiinet-cron     → zamanlayıcı (Cron Job, ÜCRETLİ plan)
+#
+# Ücretsiz planda Background Worker ve Cron Job desteği yoktur. O durumda
+# çalışan tek servis web servisidir; saatlik görevler için RENDER.md içindeki
+# "Ücretsiz plan" bölümüne bakın (harici cron + /cron/... uçları).
+#
+# Kullanım: Render > New > Blueprint → bu depoyu seçin.
+# ---------------------------------------------------------------------------
+services:
+  # ---------------------------------------------------------------- WEB ----
+  - type: web
+    name: bayiinet-web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter              # free planda "starter" yerine "free" yazın
+    healthCheckPath: /up
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_URL
+        sync: false            # https://<servis-adı>.onrender.com
+      - key: APP_KEY
+        sync: false            # php artisan key:generate --show  (ZORUNLU)
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: LOG_LEVEL
+        value: warning
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_URL
+        fromDatabase:
+          name: bayiinet-db
+          property: connectionString
+      - key: DB_SSLMODE
+        value: require
+      - key: CACHE_STORE
+        value: database
+      - key: SESSION_DRIVER
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+      - key: AUTO_XML_SYNC
+        value: "true"
+      - key: AUTO_TRENDYOL_SYNC
+        value: "true"
+      - key: RUN_MIGRATIONS
+        value: "true"
+      - key: RUN_QUEUE_WORKERS
+        value: "false"         # işçi ayrı serviste çalışıyor
+      - key: RUN_SCHEDULER
+        value: "false"         # zamanlayıcı cron servisinde çalışıyor
+      - key: PHP_CLI_SERVER_WORKERS
+        value: "4"
+      - key: CRON_TOKEN
+        sync: false            # /cron/... uçlarını koruyan gizli anahtar
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+
+  # ------------------------------------------------------------- WORKER ----
+  - type: worker
+    name: bayiinet-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh docker/worker.sh
+    plan: starter
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_KEY
+        sync: false
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_URL
+        fromDatabase:
+          name: bayiinet-db
+          property: connectionString
+      - key: DB_SSLMODE
+        value: require
+      - key: CACHE_STORE
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+
+  # --------------------------------------------------------------- CRON ----
+  - type: cron
+    name: bayiinet-cron
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh docker/cron.sh
+    schedule: "* * * * *"
+    plan: starter
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_KEY
+        sync: false
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_URL
+        fromDatabase:
+          name: bayiinet-db
+          property: connectionString
+      - key: DB_SSLMODE
+        value: require
+      - key: CACHE_STORE
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+
+databases:
+  - name: bayiinet-db
+    plan: basic-256mb         # ücretsiz planda "free" (30 gün sonra silinir!)
+    databaseName: bayiinet
+    user: bayiinet

@@ -6,6 +6,7 @@ use App\Models\Dealer;
 use App\Services\AutomationStatus;
 use App\Services\DealerTrendyolService;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -18,7 +19,7 @@ use Throwable;
  * Saatlik otomasyon tarafından kuyruğa bırakılır (komut içinde senkron
  * çalıştırıldığında uzun sürüyor ve zaman aşımına düşüyordu).
  */
-class SyncDealerTrendyolInventory implements ShouldQueue
+class SyncDealerTrendyolInventory implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable;
     use InteractsWithQueue;
@@ -29,12 +30,23 @@ class SyncDealerTrendyolInventory implements ShouldQueue
 
     public int $tries = 2;
 
+    /**
+     * Saatlik tur + gecikmeli tetikleme: aynı bayi için üst üste yığılmasın.
+     * (Gecikme süresini de kapsamalı: 30 dakika.)
+     */
+    public int $uniqueFor = 1800;
+
     public function __construct(
         public int $dealerId,
         public bool $automated = true,
     ) {
         $this->onConnection(config('queue.default', 'database'));
         $this->onQueue('marketplace');
+    }
+
+    public function uniqueId(): string
+    {
+        return 'trendyol-inventory-'.$this->dealerId;
     }
 
     public function handle(DealerTrendyolService $trendyol): void
@@ -47,14 +59,16 @@ class SyncDealerTrendyolInventory implements ShouldQueue
         try {
             $result = $trendyol->syncInventory($dealer);
             $updated = (int) ($result['updated'] ?? 0);
+            $failed = (int) ($result['failed'] ?? 0);
 
             $dealer->update(['trendyol_last_error' => null]);
 
             if ($this->automated) {
                 AutomationStatus::record(
                     'trendyol_inventory',
-                    AutomationStatus::STATUS_OK,
-                    $dealer->company_name.': '.$updated.' ürünün fiyat/stoğu güncellendi.'
+                    $failed > 0 ? AutomationStatus::STATUS_WARNING : AutomationStatus::STATUS_OK,
+                    $dealer->company_name.': '.$updated.' ürünün fiyat/stoğu güncellendi'
+                    .($failed > 0 ? ' · '.$failed.' kalem gönderilemedi' : '.')
                 );
             }
 

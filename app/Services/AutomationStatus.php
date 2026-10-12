@@ -16,6 +16,7 @@ class AutomationStatus
     /** @var array<string, array{label: string, schedule: string}> */
     public const JOBS = [
         'scheduler' => ['label' => 'Zamanlayıcı (schedule:work)', 'schedule' => 'sürekli'],
+        'host' => ['label' => 'Sunucu ayakta (keepalive)', 'schedule' => '10 dakikada 1'],
         'xml_import' => ['label' => 'XML kaynak yenileme', 'schedule' => 'saatte 1'],
         'trendyol_sync' => ['label' => 'Trendyol ürün gönderimi', 'schedule' => 'saatte 1'],
         'trendyol_inventory' => ['label' => 'Trendyol fiyat/stok eşitleme', 'schedule' => 'saatte 1'],
@@ -42,6 +43,51 @@ class AutomationStatus
     public static function heartbeat(string $job = 'scheduler'): void
     {
         PlatformSetting::write('automation:'.$job.':ran_at', now()->toIso8601String());
+    }
+
+    /**
+     * Görev bu turda BAŞLADI. Başarısız bitse bile bir sonraki tur
+     * `interval` dakika sonra olur; böylece hata durumunda her dakika
+     * tekrar denemeye çalışılmaz.
+     */
+    public static function markAttempt(string $job): void
+    {
+        PlatformSetting::write('automation:'.$job.':started_at', now()->toIso8601String());
+    }
+
+    /**
+     * Zamanlanmış görev çalıştırılmalı mı?
+     *
+     * `hourly()` yerine bu kural kullanılır: sunucu saat başında uykuda
+     * olabileceği için (Render ücretsiz plan / yeniden başlatma) görev
+     * atlanabiliyordu. Artık "son denemeden bu yana `minutes` dakika geçti"
+     * kuralıyla her dakika kontrol edilir ve gecikmiş görev yakalanır.
+     */
+    public static function dueFor(string $job, int $minutes): bool
+    {
+        try {
+            $stamp = PlatformSetting::read('automation:'.$job.':started_at', '');
+            if ($stamp === '') {
+                $stamp = PlatformSetting::read('automation:'.$job.':ran_at', '');
+            }
+        } catch (\Throwable) {
+            // Veritabanına ulaşılamıyorsa görev başlatmayalım (her dakika hata üretmesin).
+            return false;
+        }
+
+        if ($stamp === '') {
+            return true;
+        }
+
+        if ($minutes <= 0) {
+            return true;
+        }
+
+        try {
+            return now()->diffInMinutes(new \DateTimeImmutable($stamp)) >= $minutes;
+        } catch (\Throwable) {
+            return true;
+        }
     }
 
     /**

@@ -26,6 +26,18 @@ php artisan schedule:work               # terminal 3 (saatlik görevler)
 
 Aç: **http://127.0.0.1:8000** · Yönetim: **/admin** · Giriş: **/giris**
 
+## Üretim / Render
+
+Saatlik XML yenileme ve Trendyol gönderiminin Render'da kesintisiz çalışması
+için: **[`RENDER.md`](RENDER.md)** (Blueprint, worker/cron servisleri, harici
+cron uçları, ortam değişkenleri). Kısa özet: [`KURULUM.md`](KURULUM.md).
+
+Kurulumdan sonra tanı komutu:
+
+```bash
+php artisan bayiinet:doctor
+```
+
 ## Hesaplar
 
 `php artisan migrate --seed` sonrası (`DatabaseSeeder`):
