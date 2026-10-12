@@ -78,10 +78,26 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
             }
 
             $ids = $query->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
+
+            // Zaten Trendyol'da "created" olanları atla (yeniden gönderimde hız)
+            // onlyMissing=true veya tüm katalog gönderiminde
+            if ($ids !== []) {
+                $already = \App\Models\DealerTrendyolListing::query()
+                    ->where('dealer_id', $this->dealerId)
+                    ->where('status', 'created')
+                    ->whereIn('product_id', $ids)
+                    ->pluck('product_id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+                if ($already !== []) {
+                    $ids = array_values(array_diff($ids, $already));
+                }
+            }
+
             $total = count($ids);
 
             if ($total === 0) {
-                TrendyolSendProgress::fail($this->dealerId, 'Gönderilecek stoklu ürün yok.');
+                TrendyolSendProgress::fail($this->dealerId, 'Gönderilecek yeni ürün yok (hepsi zaten Trendyol'da veya stok yok).');
 
                 return;
             }

@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Dealer;
+use App\Models\Product;
 use App\Services\DealerTrendyolService;
 use App\Services\TrendyolSendProgress;
 use Illuminate\Bus\Queueable;
@@ -20,7 +21,6 @@ class SendDealerTrendyolBatch implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    /** Render worker için güvenli üst sınır */
     public int $timeout = 45;
 
     public int $tries = 1;
@@ -71,11 +71,17 @@ class SendDealerTrendyolBatch implements ShouldQueue
                 return;
             }
 
+            // Form boşsa XML kaynağı varsayılanlarından doldur → sendFast yolu
+            [$categoryId, $brandId] = $this->resolveDefaults(
+                $this->categoryId,
+                $this->brandId,
+            );
+
             $result = $trendyol->sendFast(
                 $dealer,
                 $this->productIds,
-                $this->categoryId,
-                $this->brandId,
+                $categoryId,
+                $brandId,
                 $this->attributes,
             );
 
@@ -108,12 +114,55 @@ class SendDealerTrendyolBatch implements ShouldQueue
         }
     }
 
+    /**
+     * @return array{0: ?int, 1: ?int}
+     */
+    private function resolveDefaults(?int $categoryId, ?int $brandId): array
+    {
+        if (($categoryId && $categoryId > 0) && ($brandId && $brandId > 0)) {
+            return [$categoryId, $brandId];
+        }
+
+        $products = Product::query()
+            ->with('source')
+            ->whereIn('id', $this->productIds)
+            ->get();
+
+        if (! $brandId || $brandId <= 0) {
+            foreach ($products as $product) {
+                $sid = (int) ($product->source?->default_trendyol_brand_id ?? 0);
+                if ($sid > 0) {
+                    $brandId = $sid;
+                    break;
+                }
+            }
+            if (! $brandId || $brandId <= 0) {
+                $brandId = (int) config('bayiinet.trendyol.fallback_brand_id', 2613880);
+            }
+        }
+
+        if (! $categoryId || $categoryId <= 0) {
+            foreach ($products as $product) {
+                $cid = (int) ($product->source?->default_trendyol_category_id ?? 0);
+                if ($cid > 0) {
+                    $categoryId = $cid;
+                    break;
+                }
+            }
+        }
+
+        return [
+            $categoryId && $categoryId > 0 ? $categoryId : null,
+            $brandId && $brandId > 0 ? $brandId : null,
+        ];
+    }
+
     public function failed(?Throwable $exception): void
     {
         try {
             $msg = $exception?->getMessage() ?? 'Parça işlenemedi';
             if (str_contains(mb_strtolower($msg), 'attempted too many')) {
-                $msg = 'Parça zaman aşımı veya işçi yeniden başladı. Kuyruğu sıfırlayıp tekrar gönderin; kategori+marka dolu olsun.';
+                $msg = 'Parça zaman aşımı. Kuyruğu sıfırlayıp XML kaynağına Marka No girerek tekrar deneyin.';
             }
             TrendyolSendProgress::addBatch(
                 $this->dealerId,
