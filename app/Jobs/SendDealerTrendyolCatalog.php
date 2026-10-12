@@ -15,8 +15,7 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Orchestrator: ürün id'lerini toplar, küçük batch job'lara böler, hemen biter.
- * Asıl API işi SendDealerTrendyolBatch'te.
+ * Orchestrator: ürün id listesini toplar, küçük batch job'lara böler, hemen biter.
  */
 class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
 {
@@ -25,16 +24,18 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 180;
+    public int $timeout = 120;
 
-    public int $tries = 1;
+    public int $tries = 2;
 
-    public int $maxExceptions = 1;
+    public int $maxExceptions = 2;
 
-    // Kuyruk kilitli kalırsa (işçi çökmesi vb.) en fazla 10 dk beklenir.
-    public int $uniqueFor = 600;
+    public int $uniqueFor = 300;
 
-    public const DEFAULT_BATCH_SIZE = 25;
+    public bool $failOnTimeout = false;
+
+    /** Render tek işçi için güvenli paket boyutu */
+    public const DEFAULT_BATCH_SIZE = 10;
 
     /**
      * @param  array<int, int>|null  $productIds
@@ -48,7 +49,7 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
         public array $attributes = [],
         public bool $onlyMissing = false,
     ) {
-        $this->onConnection(config('queue.default', 'database'));
+        $this->onConnection('database');
         $this->onQueue('marketplace');
     }
 
@@ -74,59 +75,52 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
             $query = Product::query()
                 ->where('is_active', true)
                 ->where(function ($q) {
-                    $q->where('stock', '>', 0)
-                        ->orWhere('has_variants', true);
+                    $q->where('stock', '>', 0)->orWhere('has_variants', true);
                 })
                 ->orderBy('id');
 
-            if ($this->productIds !== null && $this->productIds !== []) {
+            if (is_array($this->productIds) && $this->productIds !== []) {
                 $query->whereIn('id', $this->productIds);
             }
 
-            if ($this->onlyMissing) {
-                // Alt sorgu kullanılır: on binlerce id PHP'ye çekilmez.
-                $query->whereNotIn('id', function ($sub) use ($dealer): void {
-                    $sub->select('product_id')
-                        ->from('dealer_trendyol_listings')
-                        ->where('dealer_id', $dealer->id)
-                        ->whereIn('status', ['sent', 'created', 'pending'])
-                        ->whereNotNull('product_id');
-                });
-            }
-
-            $ids = $query->pluck('id')->all();
+            $ids = $query->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
             $total = count($ids);
 
             if ($total === 0) {
-                TrendyolSendProgress::finish(
-                    $dealer->id,
-                    $this->onlyMissing
-                        ? 'Gönderilecek yeni ürün yok — tüm stoklu ürünler zaten Trendyol’a gönderilmiş.'
-                        : 'Gönderilecek stoklu ürün bulunamadı.'
-                );
+                TrendyolSendProgress::fail($this->dealerId, 'Gönderilecek stoklu ürün bulunamadı.');
 
                 return;
             }
 
-            $batchSize = max(1, (int) config('bayiinet.trendyol.batch_size', self::DEFAULT_BATCH_SIZE));
+            $batchSize = max(5, min(15, (int) config('bayiinet.trendyol.batch_size', self::DEFAULT_BATCH_SIZE)));
             $chunks = array_chunk($ids, $batchSize);
             $totalBatches = count($chunks);
 
-            TrendyolSendProgress::start($dealer->id, $total, $totalBatches);
+            TrendyolSendProgress::start(
+                $this->dealerId,
+                $total,
+                $totalBatches,
+                "0 / {$total} kuyruğa alındı · {$totalBatches} parça"
+            );
 
-            foreach ($chunks as $i => $chunk) {
+            foreach ($chunks as $index => $chunk) {
+                if (TrendyolSendProgress::isCancelled($this->dealerId)) {
+                    break;
+                }
+
+                // İşçiyi boğmamak için parçalar arası gecikme
                 SendDealerTrendyolBatch::dispatch(
-                    $dealer->id,
-                    array_values($chunk),
+                    $this->dealerId,
+                    $chunk,
                     $this->categoryId,
                     $this->brandId,
                     $this->attributes,
-                    $i,
+                    $index + 1,
                     $totalBatches,
-                );  // delay yok — worker sırayla işler
+                )->delay(now()->addSeconds($index * 3));
             }
 
-            Log::info('SendDealerTrendyolCatalog dispatched batches', [
+            Log::info('SendDealerTrendyolCatalog dispatched', [
                 'dealer_id' => $dealer->id,
                 'total' => $total,
                 'batches' => $totalBatches,
@@ -134,8 +128,8 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
             ]);
         } catch (Throwable $e) {
             TrendyolSendProgress::fail($this->dealerId, 'Gönderim başlatılamadı: '.$e->getMessage());
-            Log::error('SendDealerTrendyolCatalog orchestrator failed', [
-                'dealer_id' => $dealer->id,
+            Log::error('SendDealerTrendyolCatalog failed', [
+                'dealer_id' => $this->dealerId,
                 'error' => $e->getMessage(),
             ]);
         }
@@ -143,6 +137,10 @@ class SendDealerTrendyolCatalog implements ShouldQueue, ShouldBeUnique
 
     public function failed(?Throwable $exception): void
     {
-        TrendyolSendProgress::fail($this->dealerId, 'Gönderim başlatılamadı: '.($exception?->getMessage() ?? 'Orchestrator başarısız'));
+        $msg = $exception?->getMessage() ?? 'Orchestrator başarısız';
+        if (str_contains(mb_strtolower($msg), 'attempted too many')) {
+            $msg = 'Gönderim orchestrator zaman aşımı. Tekrar deneyin.';
+        }
+        TrendyolSendProgress::fail($this->dealerId, $msg);
     }
 }

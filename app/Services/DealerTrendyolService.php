@@ -17,7 +17,7 @@ use Throwable;
  */
 class DealerTrendyolService
 {
-    public const CHUNK_SIZE = 25;
+    public const CHUNK_SIZE = 10;
 
     public function __construct(
         private readonly TrendyolMarketplaceService $api,
@@ -297,20 +297,11 @@ class DealerTrendyolService
                 $batches[] = $batchId;
                 TrendyolSendProgress::registerBatch($dealer->id, $batchId, count($chunk));
 
-                // Batch sonucu gelene kadar kısa bir süre bekle; gelmezse
-                // arka planda VerifyTrendyolBatch devam eder (uzun süre bloklama yok).
-                $verify = $this->waitAndApplyBatchResult($dealer, $connection, $batchId, $barcodeToListing);
-                $created += $verify['created'];
-                $rejected += $verify['failed'];
-                $errors = array_merge($errors, $verify['errors']);
-
-                if ($verify['pending']) {
-                    \App\Jobs\VerifyTrendyolBatch::dispatch($dealer->id, $batchId)
-                        ->delay(now()->addSeconds(20));
-                } else {
-                    // Sonuç tamamsa sayaçları hemen kesinleştir
-                    TrendyolSendProgress::resolveBatch($dealer->id, $batchId);
-                }
+                // Job'u bloke etme: doğrulama tamamen arka planda.
+                \App\Jobs\VerifyTrendyolBatch::dispatch($dealer->id, $batchId)
+                    ->delay(now()->addSeconds(15));
+                \App\Jobs\VerifyTrendyolBatch::dispatch($dealer->id, $batchId)
+                    ->delay(now()->addSeconds(45));
             } catch (Throwable $e) {
                 DealerTrendyolListing::query()->whereIn('id', $listingIds)->update([
                     'status' => 'failed',

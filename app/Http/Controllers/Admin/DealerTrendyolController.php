@@ -405,4 +405,22 @@ class DealerTrendyolController extends Controller
             return back()->with('error', $e->getMessage());
         }
     }
+
+    public function resetQueue(Dealer $dealer): \Illuminate\Http\RedirectResponse
+    {
+        \App\Services\TrendyolSendProgress::cancel($dealer->id, 'Kuyruk sıfırlandı.');
+        try {
+            \Illuminate\Support\Facades\Cache::lock('laravel_unique_job:trendyol-send-'.$dealer->id)->forceRelease();
+        } catch (\Throwable) {
+        }
+        try {
+            \Illuminate\Support\Facades\DB::table('jobs')->where('queue', 'marketplace')->delete();
+            \Illuminate\Support\Facades\DB::table('failed_jobs')->delete();
+        } catch (\Throwable $e) {
+            return back()->with('error', 'Kuyruk temizlenemedi: '.$e->getMessage());
+        }
+
+        return back()->with('success', 'Trendyol kuyruğu ve başarısız işler temizlendi. Yeni gönderim başlatabilirsiniz.');
+    }
+
 }

@@ -2,7 +2,6 @@
 cd /app || exit 1
 
 if [ -z "$APP_KEY" ]; then
-    echo "UYARI: APP_KEY tanimli degil"
     APP_KEY="$(php artisan key:generate --show)"
     export APP_KEY
 fi
@@ -13,16 +12,16 @@ chmod -R 775 storage bootstrap/cache 2>/dev/null || true
 php artisan config:clear || true
 php artisan route:clear || true
 php artisan view:clear || true
-php artisan migrate --force || echo "UYARI: migrate basarisiz"
+php artisan migrate --force || true
 php artisan storage:link 2>/dev/null || true
 php artisan bayiinet:ensure-admin || true
 
-# Takili / cok denenen isleri temizle
+# Takılı / failed işleri temizle (attempted too many times kalıntısı)
 php artisan queue:flush 2>/dev/null || true
 php artisan queue:prune-failed --hours=0 2>/dev/null || true
 
-# tries=1: job sinifi kendi tries degerini kullanir; timeout < retry_after (960)
-php artisan queue:work --queue=marketplace,default --sleep=2 --tries=1 --timeout=300 --memory=384 &
+# Tek işçi, marketplace öncelikli, timeout > job.timeout, < retry_after
+php artisan queue:work database --queue=marketplace,default --sleep=2 --tries=3 --timeout=120 --memory=512 --max-jobs=50 &
 php artisan schedule:work &
 
 export PHP_CLI_SERVER_WORKERS=1

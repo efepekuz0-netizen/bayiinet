@@ -63,6 +63,11 @@
                         @csrf
                         <button type="submit" class="btn btn-sm btn-outline-danger">Gönderimi durdur</button>
                     </form>
+            <form method="POST" action="{{ route('admin.dealers.trendyol.reset', $dealer) }}" class="d-inline" onsubmit="return confirm('Kuyruk ve başarısız işler silinsin mi?');">
+                @csrf
+                <button type="submit" class="btn btn-sm btn-outline-danger">Kuyruğu sıfırla</button>
+            </form>
+
                 </div>
                 <script>
                     (function () {

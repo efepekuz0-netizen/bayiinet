@@ -82,6 +82,7 @@ Route::middleware(['auth', 'admin'])
         Route::post('/bayiler/{dealer}/trendyol/gonder', [AdminDealerTrendyolController::class, 'send'])->name('dealers.trendyol.send');
         Route::post('/bayiler/{dealer}/trendyol/sil', [AdminDealerTrendyolController::class, 'deleteProducts'])->name('dealers.trendyol.delete');
         Route::post('/bayiler/{dealer}/trendyol/durdur', [AdminDealerTrendyolController::class, 'cancelSend'])->name('dealers.trendyol.cancel');
+        Route::post('/bayiler/{dealer}/trendyol/kuyruk-sifirla', [AdminDealerTrendyolController::class, 'resetQueue'])->name('dealers.trendyol.reset');
         Route::post('/bayiler/{dealer}/trendyol/sonuc', [AdminDealerTrendyolController::class, 'checkBatch'])->name('dealers.trendyol.batch');
         Route::post('/bayiler/{dealer}/trendyol/sonuc-tumu', [AdminDealerTrendyolController::class, 'recheckBatches'])->name('dealers.trendyol.recheck');
         Route::post('/bayiler/{dealer}/trendyol/fiyat-stok', [AdminDealerTrendyolController::class, 'syncInventory'])->name('dealers.trendyol.inventory');

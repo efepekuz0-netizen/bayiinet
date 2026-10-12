@@ -273,13 +273,13 @@ class TrendyolMarketplaceService
         $request = Http::withBasicAuth($apiKey, $apiSecret)
             ->withHeaders(['User-Agent' => $connection->account_id.' - SelfIntegration'])
             ->acceptJson()
-            ->connectTimeout(8)
-            ->timeout(30)
+            ->connectTimeout(5)
+            ->timeout(20)
             ->withoutRedirecting()
             // Yalnızca ağ/bağlantı hatalarında yeniden dener (429 ve 5xx için
             // çağıran taraf kendi bekleme stratejisini uygular).
             ->retry(
-                max(1, (int) config('bayiinet.trendyol.retry_times', 3)),
+                max(1, (int) config('bayiinet.trendyol.retry_times', 2)),
                 max(200, (int) config('bayiinet.trendyol.retry_sleep_ms', 1500)),
                 fn (\Throwable $exception): bool => $exception instanceof \Illuminate\Http\Client\ConnectionException,
             );
