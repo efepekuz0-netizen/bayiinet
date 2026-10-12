@@ -62,6 +62,11 @@
             Zamanlayıcıdan son 15 dakikada nabız alınmadı. Saatlik görevlerin çalışması için sunucuda
             <code>php artisan schedule:work</code> (veya cron ile <code>schedule:run</code>) sürecinin ayakta olması
             ve <code>php artisan queue:work</code> işçisinin çalışması gerekir.
+            <div class="mt-2">
+                Sunucu uykuya geçiyorsa (ör. Render ücretsiz plan) harici bir cron servisiyle
+                <code>/cron/keepalive?token=…</code> ve <code>/cron/hourly?token=…</code> adreslerini
+                çağırın — kurulum adımları <code>RENDER.md</code> içinde.
+            </div>
         </div>
     @endunless
 
@@ -124,6 +129,13 @@
             <i class="bi bi-info-circle me-1"></i>
             Görevler <code>routes/console.php</code> içinde tanımlıdır. Kuyruk sürücüsü <strong>{{ config('queue.default') }}</strong>.
             Trendyol gönderimi <code>marketplace</code>, XML içe aktarma <code>default</code> kuyruğunda çalışır.
+            Saatlik görevler "son çalışmadan bu yana yeterli süre geçti mi?" kuralıyla çalıştığı için
+            sunucu saat başında uykuda olsa bile en fazla birkaç dakika gecikmeyle telafi edilir.
+            @if(config('bayiinet.automation.cron_token'))
+                Harici cron anahtarı tanımlı: <code>/cron/keepalive?token=…</code> · <code>/cron/hourly?token=…</code>
+            @else
+                Harici cron kullanacaksanız <code>CRON_TOKEN</code> tanımlayın (bkz. <code>RENDER.md</code>).
+            @endif
         </div>
     </div>
 @endsection

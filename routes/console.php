@@ -1,10 +1,7 @@
 <?php
 
-use App\Models\Dealer;
 use App\Services\AutomationStatus;
-use App\Services\DealerTrendyolService;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
@@ -18,68 +15,64 @@ Artisan::command('inspire', function () {
 | Tüm zamanlanmış işler durumunu AutomationStatus'a yazar; yönetim panelindeki
 | "Otomasyon" ekranından son çalışma zamanı ve sonuçları görülebilir.
 |
-| Not: Bu görevlerin çalışabilmesi için `php artisan schedule:work` sürecinin
-| ayakta olması gerekir (docker/start.sh içinde başlatılır; Render'da ayrı bir
-| "Background Worker" servisi olarak çalıştırmak daha güvenlidir).
+| Neden `hourly()` yerine `everyMinute() + when(...)`?
+|   Render (özellikle ücretsiz plan) servisi 15 dakika trafik almazsa uyutur,
+|   dağıtımda yeniden başlatır. Saat başında uyanık olunamadığı için
+|   `hourly()` görevleri sessizce atlanıyordu (örn. 12:00'de uyuduysa 13:00'te
+|   tetiklenmez). Artık her dakika "son denemeden bu yana yeterli süre geçti mi?"
+|   kontrol edilir; sunucu ne zaman uyanırsa uyansın görev en fazla birkaç
+|   dakika gecikmeyle çalışır. `withoutOverlapping` çift çalışmayı engeller.
+|
+| Çalışması için `php artisan schedule:work` sürecinin ayakta olması gerekir
+| (web konteynerinde docker/start.sh başlatır). Ayrıca Render Cron Job ile
+| `php artisan schedule:run` ya da harici bir cron servisi ile
+| `/cron/hourly?token=...` çağrılabilir — bkz. RENDER.md.
 */
 
-// Zamanlayıcı nabzı: panel "zamanlayıcı çalışmıyor" uyarısını bununla verir.
+// Nabız: panel "zamanlayıcı çalışmıyor" uyarısını bununla verir.
 Schedule::call(function (): void {
     AutomationStatus::heartbeat('scheduler');
-})->everyFiveMinutes()->name('automation-heartbeat')->withoutOverlapping(10);
+})->everyMinute()->name('automation-heartbeat')->withoutOverlapping(10);
 
-// Saatlik XML kaynak yenileme + bayi feed önbellek temizliği
+// Saatlik XML kaynak yenileme + bayi feed önbellek temizliği (catch-up)
 Schedule::command('bayiinet:sync-dealers')
-    ->hourly()
+    ->everyMinute()
+    ->when(fn (): bool => AutomationStatus::dueFor(
+        'xml_import',
+        (int) config('bayiinet.automation.xml_interval_minutes', 55)
+    ))
     ->withoutOverlapping(120)
     ->name('bayiinet-sync-dealers')
     ->onFailure(fn () => AutomationStatus::record('xml_import', AutomationStatus::STATUS_ERROR, 'Komut çalıştırılamadı.'));
 
-// Saatlik Trendyol ürün gönderimi + fiyat/stok eşitleme
+// Saatlik Trendyol ürün gönderimi + fiyat/stok eşitleme (catch-up)
 Schedule::command('bayiinet:sync-trendyol')
-    ->hourly()
+    ->everyMinute()
+    ->when(fn (): bool => AutomationStatus::dueFor(
+        'trendyol_sync',
+        (int) config('bayiinet.automation.trendyol_interval_minutes', 55)
+    ))
     ->withoutOverlapping(120)
     ->name('bayiinet-sync-trendyol')
     ->onFailure(fn () => AutomationStatus::record('trendyol_sync', AutomationStatus::STATUS_ERROR, 'Komut çalıştırılamadı.'));
 
 // 15 dakikada bir: Trendyol'a gönderilmiş ama sonucu henüz okunamamış batch'ler
-Schedule::call(function (): void {
-    AutomationStatus::heartbeat('scheduler');
-
-    $dealers = Dealer::query()
-        ->where('status', 'active')
-        ->whereNotNull('trendyol_seller_id')
-        ->get();
-
-    $service = app(DealerTrendyolService::class);
-    $batches = 0;
-    $errors = [];
-
-    foreach ($dealers as $dealer) {
-        if (! $dealer->hasTrendyolCredentials()) {
-            continue;
-        }
-
-        try {
-            $result = $service->recheckSentBatches($dealer);
-            $batches += (int) ($result['batches'] ?? 0);
-        } catch (\Throwable $e) {
-            $errors[] = $dealer->company_name.': '.$e->getMessage();
-            Log::warning('scheduled trendyol recheck', [
-                'dealer_id' => $dealer->id,
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    AutomationStatus::record(
+Schedule::command('bayiinet:recheck-trendyol')
+    ->everyMinute()
+    ->when(fn (): bool => AutomationStatus::dueFor(
         'trendyol_recheck',
-        $errors !== [] ? AutomationStatus::STATUS_WARNING : AutomationStatus::STATUS_OK,
-        $batches.' batch kontrol edildi'.($errors !== [] ? ' · '.implode(' | ', array_slice($errors, 0, 3)) : '.')
-    );
-})->everyFifteenMinutes()->name('trendyol-recheck-sent')->withoutOverlapping(10);
+        (int) config('bayiinet.automation.recheck_interval_minutes', 14)
+    ))
+    ->withoutOverlapping(15)
+    ->name('bayiinet-recheck-trendyol');
 
-// Kuyruk bakımı: eski başarısız iş kayıtlarını temizle
+// Kuyruk bakımı: eski başarısız iş kayıtlarını temizle (günde bir).
 // Not: job_batches tablosu bu projede kullanılmıyor (migration yok),
 // bu yüzden yalnızca failed_jobs temizlenir.
-Schedule::command('queue:prune-failed --hours=168')->weekly()->name('queue-prune-failed');
+Schedule::call(function (): void {
+    AutomationStatus::markAttempt('queue_prune');
+    Artisan::call('queue:prune-failed', ['--hours' => 168]);
+})->everyMinute()
+    ->when(fn (): bool => AutomationStatus::dueFor('queue_prune', 60 * 24))
+    ->withoutOverlapping(30)
+    ->name('queue-prune-failed');

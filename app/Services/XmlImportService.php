@@ -25,6 +25,11 @@ class XmlImportService
 
     protected array $errorList = [];
 
+    /** Aynı anda veritabanına yazılan ürün grubu (bellek/performans dengesi). */
+    protected array $batch = [];
+
+    protected const BATCH_SIZE = 250;
+
     public function importFromFile(Source $source, string $filePath, ?int $userId = null): XmlImport
     {
         $this->resetStats();
@@ -62,23 +67,54 @@ class XmlImportService
                 throw new \RuntimeException('XML bağlantısı geçerli bir herkese açık HTTP(S) adresi olmalıdır.');
             }
 
+            $directory = dirname($filePath);
+            if (! is_dir($directory) && ! @mkdir($directory, 0775, true) && ! is_dir($directory)) {
+                throw new \RuntimeException('XML için depolama klasörü oluşturulamadı.');
+            }
+
+            $tempPath = $filePath.'.tmp';
+            @unlink($tempPath);
+
+            // Bellek dostu indirme: yanıt gövdesi RAM'de tutulmaz, doğrudan
+            // diske akar (200 MB'lık feed `$response->body()` ile bellek
+            // sınırını aşıyordu). Yönlendirmeler sınırlı sayıda izlenir;
+            // tedarikçi feed'leri sık sık https'e yönlendirir.
             $response = Http::accept('application/xml, text/xml, */*')
-                ->connectTimeout(5)
-                ->timeout(120)
-                ->withoutRedirecting()
+                ->connectTimeout(10)
+                ->timeout((int) config('bayiinet.xml.download_timeout', 600))
+                ->withOptions([
+                    'sink' => $tempPath,
+                    'allow_redirects' => [
+                        'max' => 5,
+                        'strict' => true,
+                        'referer' => false,
+                        'protocols' => ['http', 'https'],
+                    ],
+                ])
                 ->get($source->url);
 
             if (! $response->successful()) {
+                @unlink($tempPath);
                 throw new \RuntimeException("XML adresi HTTP {$response->status()} yanıtı verdi.");
             }
 
-            $contents = $response->body();
-            if (strlen($contents) > 200 * 1024 * 1024) {
-                throw new \RuntimeException('XML dosyası 200 MB boyut sınırını aşıyor.');
+            $size = is_file($tempPath) ? (int) filesize($tempPath) : 0;
+            if ($size <= 0) {
+                @unlink($tempPath);
+                throw new \RuntimeException('XML yanıtı boş geldi (0 bayt).');
             }
 
-            if (! Storage::disk('local')->put($relativePath, $contents)) {
-                throw new \RuntimeException('XML yanıtı güvenli depolama alanına kaydedilemedi.');
+            if ($size > (int) config('bayiinet.xml.max_bytes', 200 * 1024 * 1024)) {
+                @unlink($tempPath);
+                throw new \RuntimeException('XML dosyası boyut sınırını aşıyor.');
+            }
+
+            if (! @rename($tempPath, $filePath)) {
+                if (! @copy($tempPath, $filePath)) {
+                    @unlink($tempPath);
+                    throw new \RuntimeException('XML yanıtı güvenli depolama alanına kaydedilemedi.');
+                }
+                @unlink($tempPath);
             }
 
             $source->update(['file_path' => $relativePath]);
@@ -100,12 +136,38 @@ class XmlImportService
     protected function processFile(XmlImport $import, Source $source, string $filePath): XmlImport
     {
         try {
-            $xml = simplexml_load_file($filePath, \SimpleXMLElement::class, LIBXML_NONET | LIBXML_NOCDATA);
-            if ($xml === false) {
-                throw new \RuntimeException('XML dosyası okunamadı veya geçersiz.');
+            $size = is_file($filePath) ? (int) filesize($filePath) : 0;
+            $threshold = (int) config('bayiinet.xml.stream_threshold_bytes', 8 * 1024 * 1024);
+            $handled = false;
+
+            if ($size >= $threshold && class_exists(\XMLReader::class)) {
+                // Büyük dosya: SimpleXML tüm ağacı belleğe alır (100 MB XML ≈
+                // 600 MB+). XMLReader ile ürün ürün okuyup yalnızca bir ürünü
+                // bellekte tutuyoruz.
+                $found = $this->processStream($filePath, $source);
+                $written = $this->stats['created'] + $this->stats['updated'];
+                $handled = $found > 0 && $written > 0;
+
+                if (! $handled) {
+                    // Akış okuması ürünleri tanıyamadı. Hiçbir kayıt yazılmadığı
+                    // için kanıtlanmış SimpleXML yoluna dönmek güvenli.
+                    $this->resetStats();
+                    Log::warning('XML akış okuması sonuç vermedi, SimpleXML denenecek', [
+                        'source_id' => $source->id,
+                        'size' => $size,
+                        'found' => $found,
+                    ]);
+                }
             }
 
-            $this->processXml($xml, $source);
+            if (! $handled) {
+                $xml = simplexml_load_file($filePath, \SimpleXMLElement::class, LIBXML_NONET | LIBXML_NOCDATA);
+                if ($xml === false) {
+                    throw new \RuntimeException('XML dosyası okunamadı veya geçersiz.');
+                }
+
+                $this->processXml($xml, $source);
+            }
 
             $import->update([
                 'status' => 'completed',
@@ -159,6 +221,7 @@ class XmlImportService
             'errors' => 0,
         ];
         $this->errorList = [];
+        $this->batch = [];
     }
 
     protected function isPublicHttpUrl(?string $url): bool
@@ -207,35 +270,116 @@ class XmlImportService
             throw new \RuntimeException('XML içinde ürün listesi bulunamadı. Kök düğüm altında product/Product/Urun/item arandı.');
         }
 
-        $batch = [];
         foreach ($products as $item) {
-            $this->stats['total']++;
-            try {
-                $product = $this->parseProduct($item, $source);
-            } catch (\Throwable $e) {
-                $this->stats['errors']++;
-                $this->errorList[] = [
-                    'stock_code' => $this->xmlText($item, ['stock_code', 'stockCode', 'ProductCode', 'StokKodu', 'code', 'sku'], 'unknown'),
-                    'error' => $e->getMessage(),
-                ];
-
-                continue;
-            }
-
-            if ($product === null) {
-                continue;
-            }
-
-            $batch[$product['data']['stock_code']] = $product;
-            if (count($batch) >= 250) {
-                $this->upsertProductBatch($batch, $source);
-                $batch = [];
-            }
+            $this->importNode($item, $source);
         }
 
-        if ($batch !== []) {
-            $this->upsertProductBatch($batch, $source);
+        $this->flushBatch($source);
+    }
+
+    /**
+     * Bellek dostu içe aktarma: XMLReader ile ürün düğümleri teker teker
+     * okunur, her düğüm işlendikten sonra bellekten düşer.
+     *
+     * @return int  bulunan ürün düğümü sayısı (0 ise çağıran SimpleXML'e döner)
+     */
+    protected function processStream(string $filePath, Source $source): int
+    {
+        $reader = new \XMLReader();
+
+        if (! @$reader->open($filePath, null, LIBXML_NONET | LIBXML_COMPACT)) {
+            throw new \RuntimeException('XML dosyası akış olarak açılamadı.');
         }
+
+        $previousErrors = libxml_use_internal_errors(true);
+        $found = 0;
+
+        try {
+            while (@$reader->read()) {
+                if ($reader->nodeType !== \XMLReader::ELEMENT) {
+                    continue;
+                }
+
+                $name = mb_strtolower((string) $reader->localName);
+                if (! in_array($name, ['product', 'urun', 'item'], true)) {
+                    continue;
+                }
+
+                $found++;
+
+                $node = $reader->expand();
+
+                // Not: XMLReader::expand() ile dönen düğümün ilişkili belgesi
+                // olmadığı için doğrudan simplexml_import_dom() şu hatayı verir:
+                //   "Imported Node must have associated Document"
+                // Bu yüzden düğüm bir DOMDocument'e aktarılır.
+                if ($node instanceof \DOMNode) {
+                    $document = new \DOMDocument();
+                    $imported = $document->importNode($node, true);
+
+                    if ($imported !== false) {
+                        $document->appendChild($imported);
+
+                        $simple = simplexml_import_dom($imported, \SimpleXMLElement::class);
+                        if ($simple instanceof \SimpleXMLElement) {
+                            $this->importNode($simple, $source);
+                        }
+                    }
+                }
+
+                // İç içe aynı adlı düğümler tekrar işlenmesin
+                $reader->next();
+            }
+        } finally {
+            $reader->close();
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousErrors);
+        }
+
+        $this->flushBatch($source);
+
+        return $found;
+    }
+
+    /** Tek bir ürün düğümünü işler ve grup dolunca toplu yazımı tetikler. */
+    protected function importNode(\SimpleXMLElement $item, Source $source): void
+    {
+        $this->stats['total']++;
+
+        try {
+            $product = $this->parseProduct($item, $source);
+        } catch (\Throwable $e) {
+            $this->stats['errors']++;
+            $this->errorList[] = [
+                'stock_code' => $this->xmlText($item, ['stock_code', 'stockCode', 'ProductCode', 'StokKodu', 'code', 'sku'], 'unknown'),
+                'error' => $e->getMessage(),
+            ];
+
+            return;
+        }
+
+        if ($product === null) {
+            return;
+        }
+
+        $this->batch[$product['data']['stock_code']] = $product;
+
+        if (count($this->batch) >= self::BATCH_SIZE) {
+            $this->flushBatch($source);
+        }
+    }
+
+    /** Bellekteki ürün grubunu veritabanına yazar. */
+    protected function flushBatch(Source $source): void
+    {
+        if ($this->batch === []) {
+            return;
+        }
+
+        $batch = $this->batch;
+        $this->batch = [];
+
+        $this->upsertProductBatch($batch, $source);
     }
 
     /**

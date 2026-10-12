@@ -268,7 +268,11 @@ class DealerTrendyolService
         $rejected = 0;
         $batches = [];
 
-        foreach (array_chunk($readyCreate, self::CHUNK_SIZE) as $chunk) {
+        foreach (array_chunk($readyCreate, self::CHUNK_SIZE) as $index => $chunk) {
+            if ($index > 0) {
+                $this->throttle();
+            }
+
             $items = array_column($chunk, 'item');
             $listingIds = array_map(fn (array $row): int => $row['listing']->id, $chunk);
             $barcodeToListing = [];
@@ -320,7 +324,11 @@ class DealerTrendyolService
 
         // 5) Mevcut ürünlerin fiyat/stoğunu güncelle
         $updated = 0;
-        foreach (array_chunk($readyUpdate, 1000) as $chunk) {
+        foreach (array_chunk($readyUpdate, 1000) as $index => $chunk) {
+            if ($index > 0) {
+                $this->throttle();
+            }
+
             $items = array_column($chunk, 'item');
             try {
                 $response = $this->api->updatePriceAndInventory($connection, $items);
@@ -471,15 +479,23 @@ class DealerTrendyolService
                     }
 
                     if ($alreadyOnTy) {
-                        $readyUpdate[] = [
-                            'listing' => $listing,
-                            'item' => [
-                                'barcode' => $barcode,
-                                'quantity' => $qty,
-                                'salePrice' => $sale,
-                                'listPrice' => max((float) ($product->list_price ?? 0), $sale),
-                            ],
-                        ];
+                        // Trendyol'da zaten var: yeniden "ürün oluştur" göndermek
+                        // "barkod zaten mevcut" hatası üretir (her saat tekrarlayan
+                        // hataların başlıca nedeniydi).
+                        //
+                        // 'sent' → gönderildi, sonucu bekleniyor: dokunma
+                        // 'created' → kesinleşti: fiyat/stoğu tazele
+                        if ($existing->status === 'created') {
+                            $readyUpdate[] = [
+                                'listing' => $listing,
+                                'item' => [
+                                    'barcode' => $barcode,
+                                    'quantity' => $qty,
+                                    'salePrice' => $sale,
+                                    'listPrice' => max((float) ($product->list_price ?? 0), $sale),
+                                ],
+                            ];
+                        }
                         continue;
                     }
 
@@ -523,7 +539,11 @@ class DealerTrendyolService
         $batches = [];
         $updated = 0;
 
-        foreach (array_chunk($readyCreate, 100) as $chunk) {
+        foreach (array_chunk($readyCreate, 100) as $index => $chunk) {
+            if ($index > 0) {
+                $this->throttle();
+            }
+
             $items = array_column($chunk, 'item');
             $listingIds = array_map(fn ($r) => $r['listing']->id, $chunk);
             try {
@@ -558,7 +578,11 @@ class DealerTrendyolService
             }
         }
 
-        foreach (array_chunk($readyUpdate, 50) as $chunk) {
+        foreach (array_chunk($readyUpdate, 1000) as $index => $chunk) {
+            if ($index > 0) {
+                $this->throttle();
+            }
+
             try {
                 $this->api->updatePriceAndInventory($connection, array_column($chunk, 'item'));
                 $updated += count($chunk);
@@ -740,9 +764,22 @@ class DealerTrendyolService
                 $reasons = collect((array) data_get($row, 'failureReasons', []))
                     ->map(fn ($reason) => is_string($reason) ? $reason : json_encode($reason, JSON_UNESCAPED_UNICODE))
                     ->implode(' | ');
+                $message = $reasons !== '' ? $reasons : 'Trendyol ürünü reddetti.';
+
+                if ($this->alreadyExistsError($message)) {
+                    $listing->update([
+                        'status' => 'created',
+                        'error' => mb_substr('İlan Trendyol\'da zaten mevcut. '.$message, 0, 1000),
+                        'checked_at' => now(),
+                    ]);
+                    $created++;
+
+                    continue;
+                }
+
                 $listing->update([
                     'status' => 'failed',
-                    'error' => mb_substr($reasons !== '' ? $reasons : 'Trendyol ürünü reddetti.', 0, 1000),
+                    'error' => mb_substr($message, 0, 1000),
                     'checked_at' => now(),
                 ]);
                 $failed++;
@@ -773,7 +810,10 @@ class DealerTrendyolService
         DealerTrendyolListing::query()
             ->with(['product.variants', 'variant'])
             ->where('dealer_id', $dealer->id)
-            ->whereIn('status', ['sent', 'created'])
+            // Yalnızca Trendyol'da kesinleşmiş ilanlar: 'sent' durumundakiler
+            // için fiyat güncellemesi Trendyol tarafında "ürün bulunamadı"
+            // hatasıyla sonuçlanıyordu.
+            ->where('status', 'created')
             ->chunkById(200, function ($listings) use ($margin, &$items) {
                 foreach ($listings as $listing) {
                     $product = $listing->product;
@@ -799,14 +839,47 @@ class DealerTrendyolService
             });
 
         $batches = [];
-        foreach (array_chunk($items, 1000) as $chunk) {
-            $response = $this->api->updatePriceAndInventory($connection, $chunk);
-            if (! empty($response['batchRequestId'])) {
-                $batches[] = (string) $response['batchRequestId'];
+        $failed = 0;
+        $errors = [];
+
+        foreach (array_chunk($items, 1000) as $index => $chunk) {
+            if ($index > 0) {
+                $this->throttle();
+            }
+
+            try {
+                $response = $this->api->updatePriceAndInventory($connection, $chunk);
+                if (! empty($response['batchRequestId'])) {
+                    $batches[] = (string) $response['batchRequestId'];
+                }
+            } catch (Throwable $e) {
+                // Bir paket hata verirse kalan paketler yine gönderilsin.
+                $failed += count($chunk);
+                if (count($errors) < 5) {
+                    $errors[] = mb_substr($e->getMessage(), 0, 200);
+                }
+                report($e);
             }
         }
 
-        return ['updated' => count($items), 'batches' => $batches];
+        return [
+            'updated' => count($items) - $failed,
+            'failed' => $failed,
+            'batches' => $batches,
+            'errors' => $errors,
+        ];
+    }
+
+    /**
+     * Trendyol API hız sınırlarına yakalanmamak için paketler arasında kısa bekleme.
+     * (Milisaniye cinsinden `TRENDYOL_THROTTLE_MS`, varsayılan 120 ms.)
+     */
+    private function throttle(): void
+    {
+        $milliseconds = (int) config('bayiinet.trendyol.throttle_ms', 250);
+        if ($milliseconds > 0) {
+            usleep($milliseconds * 1000);
+        }
     }
 
     /**
@@ -1011,6 +1084,40 @@ class DealerTrendyolService
         }
 
         return null;
+    }
+
+    /**
+     * Trendyol "bu barkod zaten kayıtlı" hatası mı?
+     *
+     * Bu mesaj döndüğünde ürün aslında mağazada vardır; her saat yeniden
+     * "ürün oluştur" göndermek sonsuz hata döngüsü yaratıyordu.
+     */
+    private function alreadyExistsError(string $message): bool
+    {
+        $text = $this->normalizeText($message);
+
+        foreach ([
+            'already exist',
+            'already regist',
+            'duplicate',
+            'zaten mevcut',
+            'zaten kayitli',
+            'barkod mevcut',
+            'mevcut barkod',
+            'barkod kayitli',
+            'sistemde kayitli',
+            'eslesen urun',
+            'kayitli urun',
+            'ait urun bulun',
+            'urun bulunmaktadir',
+            'benzersiz olmali',
+        ] as $needle) {
+            if (str_contains($text, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function normalizeText(string $s): string
@@ -1265,8 +1372,25 @@ class DealerTrendyolService
                     ]);
                 }
             } else {
-                $failed++;
                 $msg = $failure !== '' ? $failure : ($status !== '' ? $status : 'Trendyol reddetti');
+
+                // "Barkod zaten kayıtlı" → ürün Trendyol'da VAR. Hata sayıp her
+                // saat yeniden göndermek yerine ilanı 'created' işaretliyoruz;
+                // fiyat/stok güncellemesi bundan sonra normal akışta yapılır.
+                if ($this->alreadyExistsError($msg)) {
+                    $created++;
+                    if ($listingId) {
+                        DealerTrendyolListing::query()->whereKey($listingId)->update([
+                            'status' => 'created',
+                            'error' => mb_substr('İlan Trendyol\'da zaten mevcut. '.$msg, 0, 1000),
+                            'checked_at' => now(),
+                        ]);
+                    }
+
+                    continue;
+                }
+
+                $failed++;
                 if ($listingId) {
                     DealerTrendyolListing::query()->whereKey($listingId)->update([
                         'status' => 'failed',
@@ -1313,7 +1437,8 @@ class DealerTrendyolService
         // margin yüzde (60) -> calculator 0.60 veya 60 kabul eder
         $calculated = $this->priceCalculator->calculate($base, $desi, [
             'profit_margin' => $margin,
-            'commission_rate' => 0.15,
+            // Komisyon oranı yapılandırılabilir (varsayılan %15)
+            'commission_rate' => (float) config('bayiinet.trendyol.commission_rate', 15),
             'min_profit' => 10,
             'round_to' => 0.99,
             'delivery_type' => 'standart',

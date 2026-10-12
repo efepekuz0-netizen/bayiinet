@@ -30,10 +30,21 @@ class ImportSourceJob implements ShouldQueue, ShouldBeUnique
 
     public int $timeout = 840;
 
-    public int $tries = 1;
+    /**
+     * 2 deneme: konteyner yeniden başlatılırsa (Render dağıtımı / uyku) iş
+     * yarıda kalır ve `retry_after` sonrası tekrar denenir. İçe aktarma
+     * upsert tabanlı olduğu için tekrar çalışması güvenlidir.
+     */
+    public int $tries = 2;
 
     /** Aynı kaynak için aynı anda iki içe aktarma çalışmasın. */
     public int $uniqueFor = 3600;
+
+    /** @return array<int, int> */
+    public function backoff(): array
+    {
+        return [60, 300];
+    }
 
     public function __construct(
         public int $sourceId,

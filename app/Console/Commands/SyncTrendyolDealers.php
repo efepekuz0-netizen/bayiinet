@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\SendDealerTrendyolCatalog;
+use App\Jobs\SendDealerTrendyolRun;
 use App\Jobs\SyncDealerTrendyolInventory;
 use App\Models\Dealer;
 use App\Services\AutomationStatus;
@@ -25,8 +25,9 @@ class SyncTrendyolDealers extends Command
 
     public function handle(): int
     {
-        // Zamanlayıcının ayakta olduğunu kaydet
+        // Zamanlayıcının ayakta olduğunu kaydet + bu turun denendiğini işaretle
         AutomationStatus::heartbeat('scheduler');
+        AutomationStatus::markAttempt('trendyol_sync');
 
         if (! (bool) config('bayiinet.automation.trendyol_sync', true)) {
             $this->warn('Trendyol otomatik senkronu kapalı (AUTO_TRENDYOL_SYNC=false).');
@@ -58,12 +59,19 @@ class SyncTrendyolDealers extends Command
                 continue;
             }
 
-            // Önceki gönderim hâlâ sürüyorsa aynı ürünleri tekrar tekrar göndermeyelim
+            // Önceki gönderim hâlâ sürüyorsa aynı ürünleri tekrar tekrar göndermeyelim.
+            // Ancak yarım kalmış (güncellenmeyen) bir durum varsa devam edilir:
+            // aksi hâlde bayinin otomasyonu saatlerce durur.
             if (TrendyolSendProgress::isActive($dealer->id) && ! $this->option('force')) {
-                $skipped++;
-                $this->line("  → {$dealer->company_name}: gönderim sürüyor, atlandı");
+                if (! TrendyolSendProgress::isStale($dealer->id, 45)) {
+                    $skipped++;
+                    $this->line("  → {$dealer->company_name}: gönderim sürüyor, atlandı");
 
-                continue;
+                    continue;
+                }
+
+                $this->warn("  → {$dealer->company_name}: önceki gönderim yarım kalmış, yeni tur başlatılıyor");
+                TrendyolSendProgress::forget($dealer->id);
             }
 
             try {
@@ -71,10 +79,18 @@ class SyncTrendyolDealers extends Command
                     SyncDealerTrendyolInventory::dispatch($dealer->id, true);
                     $this->line("  → {$dealer->company_name}: fiyat/stok eşitleme kuyruğa alındı");
                 } else {
-                    // Yeni ürünler arka planda gönderilir + mevcutların fiyat/stoku eşitlenir
-                    SendDealerTrendyolCatalog::dispatch($dealer->id, null, null, null, [], true);
-                    SyncDealerTrendyolInventory::dispatch($dealer->id, true);
-                    $this->line("  → {$dealer->company_name}: yeni ürünler ve fiyat/stok kuyruğa alındı");
+                    // Yeni ürünler: masaüstü hızı (100'lük paket, tek iş).
+                    // Eskiden 5'er ürünlük binlerce küçük iş kuyruğa atılıyordu;
+                    // 15.000 ürünlük bir katalogda bu yüzlerce dakika sürüyordu.
+                    SendDealerTrendyolRun::dispatch($dealer->id, null, null, null, [], true);
+
+                    // Mevcut ilanların fiyat/stoğu gönderim bittikten sonra eşitlenir.
+                    SyncDealerTrendyolInventory::dispatch($dealer->id, true)
+                        ->delay(now()->addMinutes((int) config('bayiinet.automation.inventory_delay_minutes', 15)));
+
+                    $this->line("  → {$dealer->company_name}: yeni ürünler ve ("
+                        .(int) config('bayiinet.automation.inventory_delay_minutes', 15)
+                        .' dk sonra) fiyat/stok kuyruğa alındı');
                 }
                 $sent++;
             } catch (Throwable $e) {

@@ -1,5 +1,46 @@
 # Bayiinet — Kapsamlı Kod İncelemesi
 
+---
+
+> ## 🛠️ 2026-10-12 — Render otomasyon turu (saatlik XML + Trendyol)
+>
+> Bu turda odak: **"Render'da Trendyol gönderimi, saatlik gönderim/güncelleme ve
+> saatlik XML yenileme sorunsuz çalışsın."** Kurulum rehberi: `RENDER.md`.
+>
+> ### Bulunan ve düzeltilen kritik hatalar
+>
+> | # | Bulgu | Etki | Düzeltme |
+> |---|---|---|---|
+> | **R1** | `docker/start.sh` her açılışta `php artisan queue:flush` çalıştırıyordu | Dağıtım/uyanma anında **tüm bekleyen Trendyol işleri siliniyordu** | Kaldırıldı; yalnızca 7 günden eski başarısız kayıtlar temizleniyor |
+> | **R2** | `APP_KEY` yoksa her başlatmada yeni anahtar üretiliyordu | Şifreli `trendyol_credentials` çözülemez → **gönderim sessizce durur** | Anahtar `/var/data/app_key` dosyasına yazılır, yoksa yüksek sesle uyarır; `bayiinet:doctor` ve `/health-detail` raporlar |
+> | **R3** | Görevler `hourly()` ile tanımlıydı | Render 15 dk trafik almazsa uyur; **12:00'de uyuyan servis 13:00 görevini kaçırır** | `everyMinute() + AutomationStatus::dueFor()` telafi mantığı: "son denemeden 55 dk geçtiyse çalış" |
+> | **R4** | Saatlik Trendyol gönderimi ürün başına 5'lik binlerce küçük iş atıyordu | 15.000 üründe kuyruk şişiyor, gönderim saatler sürüyordu | `SendDealerTrendyolRun` (100'lük paket, tek iş) kullanılıyor |
+> | **R5** | Trendyol'da **var olan** barkodlar hata sayılıp her saat yeniden gönderiliyordu | Sonsuz "barkod zaten mevcut" döngüsü + boşa API trafiği | "zaten mevcut" yanıtı `created` kabul edilir, fiyat/stok moduna geçilir (`alreadyExistsError()`) |
+> | **R6** | Varyantlı üründe tek varyant gönderilmişse ürün tamamen atlanıyordu | Eksik varyantlar **hiç gönderilmiyordu** | `alreadyCoveredProductIds()` — varyant sayısı kadar kayıt varsa atlanır |
+> | **R7** | Konteyner yeniden başlayınca `TrendyolSendProgress` "running" asılı kalıyordu | O bayi **12 saat** boyunca otomatik senkrondan çıkıyordu | `TrendyolSendProgress::isStale()` — 45 dk sonra yeni tur başlar |
+> | **R8** | Fiyat/stok güncellemesi `sent` (henüz oluşmamış) ilanlara da gidiyordu | Trendyol "ürün bulunamadı" yığını | Yalnızca `created` ilanlar; paketler arası throttle eklendi |
+> | **R9** | Büyük XML: `simplexml_load_file` + `$response->body()` | 100 MB feed'de **bellek patlaması** (OOM) ve yarım içe aktarma | Diske akan indirme (`sink`) + 8 MB üzeri dosyalar için `XMLReader` akış okuması (tek ürün bellekte) |
+> | **R10** | `withoutRedirecting()` | Yönlendiren feed'lerde `HTTP 301` hatası | En fazla 5 yönlendirme izlenir |
+> | **R11** | Harici cron/worker yoktu (ücretsiz planda otomasyon duruyordu) | Saatlik görevler hiç çalışmıyor | Token korumalı `/cron/keepalive|hourly|xml|trendyol|recheck|queue|doctor` uçları + `render.yaml` (web + worker + cron) |
+> | **R12** | XML içe aktarma tek denemeydi; yeniden başlatmada kayboluyordu | Saatlik tur başarısız | 2 deneme + backoff (60/300 sn) |
+>
+> ### Doğrulama
+> * `XMLReader::expand()` ile alınan düğümün ilişkili belgesi olmadığı için
+>   `simplexml_import_dom()` **"Imported Node must have associated Document"**
+>   hatası veriyordu — düğüm önce bir `DOMDocument`'e aktarılıyor. Bu davranış
+>   akış okuması yazılırken PHP 8.3 üzerinde **çalıştırılarak** doğrulandı
+>   (CDATA, iç içe `<item>`, varyant döngüsü, görseller).
+> * Tüm PHP dosyaları PHP 8 sözdizimi ayrıştırıcısından geçirildi (152 dosya, 0 hata).
+>
+> ### Sizde yapılacaklar (özet)
+> 1. Render ortam değişkenlerine **`APP_KEY`** ve **`CRON_TOKEN`** ekleyin.
+> 2. Ücretsiz plan: harici cron ile `/cron/keepalive` (10 dk) + `/cron/hourly`.
+>    Ücretli plan: `render.yaml` → web + worker + cron.
+> 3. Kurulumdan sonra `php artisan bayiinet:doctor` çalıştırın.
+> 4. Ücretsiz Render Postgres **30 gün sonra silinir** — üretimde ücretli veritabanı kullanın.
+
+---
+
 > ## ✅ Durum — 2026-10-09 (düzeltme sonrası)
 >
 > Aşağıdaki bulguların tamamı **kodda düzeltildi**. Kalan yalnızca sizin

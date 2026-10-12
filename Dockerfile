@@ -16,9 +16,10 @@ RUN mkdir -p storage/framework/cache/data \
              storage/framework/views \
              storage/logs \
              storage/app/public \
+             storage/app/private/xml \
              bootstrap/cache && \
     chmod -R 775 storage bootstrap/cache && \
-    chmod +x docker/start.sh
+    chmod +x docker/start.sh docker/worker.sh docker/cron.sh
 
 RUN composer install --no-dev --optimize-autoloader --no-interaction
 

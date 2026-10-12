@@ -42,6 +42,19 @@ Route::get('/ping', function () {
     return response('ok', 200)->header('Content-Type', 'text/plain');
 });
 
+/*
+|--------------------------------------------------------------------------
+| Harici cron uçları (token korumalı)
+|--------------------------------------------------------------------------
+| Render ücretsiz planda servis 15 dk trafik almazsa uyur; Background Worker
+| ve Cron Job servisleri ücretsiz değildir. Ücretsiz bir harici cron servisi
+| (cron-job.org, UptimeRobot …) aşağıdaki uçları çağırarak saatlik otomasyonu
+| ayakta tutabilir. Ayrıntı: RENDER.md
+*/
+Route::get('/cron/{task}', [\App\Http\Controllers\CronController::class, 'run'])
+    ->middleware('throttle:60,1')
+    ->name('cron.run');
+
 Route::get('/', [HomeController::class, 'index'])->name('home');
 Route::view('/gizlilik', 'pages.gizlilik')->name('pages.gizlilik');
 Route::view('/mesafeli-satis', 'pages.mesafeli-satis')->name('pages.mesafeli');

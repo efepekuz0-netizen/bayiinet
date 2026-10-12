@@ -24,6 +24,9 @@ class SyncDealerFeeds extends Command
     {
         // Zamanlayıcının ayakta olduğunu kaydet (panelde "otomasyon çalışıyor mu?" göstergesi)
         AutomationStatus::heartbeat('scheduler');
+        // Bu turun denendiğini işaretle: başarısız olsa bile bir sonraki tur
+        // `xml_interval_minutes` dakika sonra olur (her dakika tekrar denenmez).
+        AutomationStatus::markAttempt('xml_import');
 
         if (! (bool) config('bayiinet.automation.xml_sync', true)) {
             $this->warn('XML otomatik senkronu kapalı (AUTO_XML_SYNC=false).');
