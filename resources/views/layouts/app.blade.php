@@ -207,10 +207,13 @@
                 <a href="{{ route('admin.orders.index') }}" class="{{ request()->routeIs('admin.orders.*') ? 'active' : '' }}">
                     <i class="bi bi-bag-check"></i> Siparişler
                 </a>
+                <a href="{{ route('admin.dealers.index') }}" class="{{ request()->routeIs('admin.dealers.*') ? 'active' : '' }}">
+                    <i class="bi bi-people"></i> Bayiler
+                </a>
                 <a href="{{ route('admin.customers.index') }}" class="{{ request()->routeIs('admin.customers.*') ? 'active' : '' }}">
                     <i class="bi bi-person-lines-fill"></i> Müşteriler
                 </a>
-                <div class="nav-section">Katalog</div>
+                <div class="nav-section">Ürün & XML</div>
                 <a href="{{ route('admin.sources.index') }}" class="{{ request()->routeIs('admin.sources.*') ? 'active' : '' }}">
                     <i class="bi bi-hdd-network"></i> XML Kaynakları
                 </a>
@@ -220,13 +223,11 @@
                 <a href="{{ route('admin.products.critical') }}" class="{{ request()->routeIs('admin.products.critical') ? 'active' : '' }}">
                     <i class="bi bi-exclamation-triangle"></i> Kritik Stok
                 </a>
-                <a href="{{ route('admin.dealers.index') }}" class="{{ request()->routeIs('admin.dealers.*') ? 'active' : '' }}">
-                    <i class="bi bi-people"></i> Bayiler
-                </a>
+                
                 <a href="{{ route('admin.blacklist.index') }}" class="{{ request()->routeIs('admin.blacklist.*') ? 'active' : '' }}">
                     <i class="bi bi-slash-circle"></i> Kara Liste
                 </a>
-                <div class="nav-section">Pazaryeri</div>
+                <div class="nav-section">Pazaryeri & sistem</div>
                 <a href="{{ route('admin.marketplace.index') }}" class="{{ request()->routeIs('admin.marketplace.*') ? 'active' : '' }}">
                     <i class="bi bi-shop"></i> Pazaryeri Yönetimi
                 </a>

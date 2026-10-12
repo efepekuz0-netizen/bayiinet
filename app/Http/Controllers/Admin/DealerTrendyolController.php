@@ -190,13 +190,7 @@ class DealerTrendyolController extends Controller
         // Sayfa anında dönsün — gönderim kuyrukta
         TrendyolSendProgress::queued($dealer->id, $countHint.' ürün kuyruğa alındı…');
 
-        if ($categoryId <= 0 || $brandId <= 0) {
-            return $this->back($dealer)->with(
-                'error',
-                'Zaman aşımını önlemek için Trendyol Kategori No ve Marka No zorunlu. Formdaki alanları doldurup kaydedin, sonra tekrar gönderin.'
-            );
-        }
-
+        // Kategori/marka boş olabilir → XML kaynağı varsayılanı + otomatik eşleme
         SendDealerTrendyolCatalog::dispatch(
             $dealer->id,
             $sendAll ? null : $productIds,

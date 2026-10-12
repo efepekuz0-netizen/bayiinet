@@ -14,6 +14,26 @@
 </div>
 <div class="form-check mt-3"><input type="checkbox" name="prices_include_tax" value="1" class="form-check-input" id="includeTax" @checked(old('prices_include_tax', $source->prices_include_tax))><label class="form-check-label" for="includeTax">XML alış fiyatları KDV dahil</label></div>
 <div class="form-check mt-2"><input type="checkbox" name="recalculate" value="1" class="form-check-input" id="recalc" checked><label class="form-check-label" for="recalc">Bu kaynağın ürün fiyatlarını şimdi yeniden hesapla</label></div>
+
+<div class="border rounded p-3 mt-3 bg-light">
+    <div class="fw-semibold mb-2">Trendyol varsayılanları (bu XML için)</div>
+    <p class="small text-muted mb-2">Ürün markası Trendyol’da bulunamazsa veya boşsa bu değerler kullanılır. Marka adını yazarsanız gönderimde XML markasının yerine de geçebilir.</p>
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label">Varsayılan Marka No</label>
+            <input name="default_trendyol_brand_id" type="number" min="1" class="form-control" value="{{ old('default_trendyol_brand_id', $source->default_trendyol_brand_id) }}" placeholder="örn. 2613880">
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Varsayılan Marka Adı</label>
+            <input name="default_trendyol_brand_name" class="form-control" value="{{ old('default_trendyol_brand_name', $source->default_trendyol_brand_name) }}" placeholder="XML markası boşsa / zorla">
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Varsayılan Kategori No</label>
+            <input name="default_trendyol_category_id" type="number" min="1" class="form-control" value="{{ old('default_trendyol_category_id', $source->default_trendyol_category_id) }}" placeholder="Boş = otomatik eşle">
+        </div>
+    </div>
+</div>
+
 <button class="btn btn-primary mt-4">Kaydet ve uygula</button>
 </form></div></div>
 @endsection

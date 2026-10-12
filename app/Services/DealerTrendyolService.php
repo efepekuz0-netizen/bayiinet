@@ -73,7 +73,7 @@ class DealerTrendyolService
         $margin = $this->dealerMargin($dealer);
 
         $products = Product::query()
-            ->with('variants')
+            ->with(['variants', 'source'])
             ->whereIn('id', $productIds)
             ->get();
 
@@ -108,12 +108,17 @@ class DealerTrendyolService
         $errors = [];
 
         foreach ($products as $product) {
-            $resolved = $this->categoryMatcher->match($product, $leaves, $categoryId && $categoryId > 0 ? $categoryId : null);
+            $sourceCat = (int) ($product->source?->default_trendyol_category_id ?? 0);
+            $forcedCat = ($categoryId && $categoryId > 0) ? $categoryId : ($sourceCat > 0 ? $sourceCat : null);
+            $resolved = $this->categoryMatcher->match($product, $leaves, $forcedCat);
             $productCategoryId = (int) ($resolved['id'] ?? 0);
+            if ($productCategoryId <= 0 && $sourceCat > 0) {
+                $productCategoryId = $sourceCat;
+            }
 
             if ($productCategoryId <= 0) {
                 $failed++;
-                $errors[] = $this->label($product).': Trendyol kategorisi bulunamadı (ürün listesinden kategori numarasını elle girin)';
+                $errors[] = $this->label($product).': Trendyol kategorisi bulunamadı (XML kaynağına varsayılan kategori no girin veya formdan seçin)';
                 continue;
             }
 
@@ -378,7 +383,7 @@ class DealerTrendyolService
 
         $connection = $this->connection($dealer);
         $margin = $this->dealerMargin($dealer);
-        $products = Product::query()->with('variants')->whereIn('id', $productIds)->get();
+        $products = Product::query()->with(['variants', 'source'])->whereIn('id', $productIds)->get();
 
         $failed = 0;
         $errors = [];
@@ -605,7 +610,13 @@ class DealerTrendyolService
     /** Ürün için kullanılacak Trendyol marka numarası. */
     private function brandIdFor(Product $product, array $brandCache, ?int $defaultBrand, ?int $genericBrandId): int
     {
+        // 1) XML marka adı → Trendyol cache
         $brandName = trim((string) ($product->brand ?? ''));
+        // Kaynakta zorla marka adı tanımlıysa onu kullan
+        $sourceBrandName = trim((string) ($product->source?->default_trendyol_brand_name ?? ''));
+        if ($sourceBrandName !== '') {
+            $brandName = $sourceBrandName;
+        }
         if ($brandName !== '') {
             $id = (int) ($brandCache[mb_strtolower($brandName)] ?? 0);
             if ($id > 0) {
@@ -613,15 +624,20 @@ class DealerTrendyolService
             }
         }
 
+        // 2) Bu XML kaynağına özel Marka No
+        $sourceBrandId = (int) ($product->source?->default_trendyol_brand_id ?? 0);
+        if ($sourceBrandId > 0) {
+            return $sourceBrandId;
+        }
+
+        // 3) Formdan gelen / genel varsayılan
         if ($defaultBrand) {
             return (int) $defaultBrand;
         }
-
         if ($genericBrandId) {
             return (int) $genericBrandId;
         }
 
-        // Son çare: yapılandırmadaki genel marka (Diğer)
         $fb = (int) config('bayiinet.trendyol.fallback_brand_id', 2613880);
 
         return $fb > 0 ? $fb : 2613880;

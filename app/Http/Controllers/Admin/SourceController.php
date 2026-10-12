@@ -45,6 +45,9 @@ class SourceController extends Controller
             'min_margin_percent' => 'nullable|numeric|min:0|max:500',
             'tax_rate' => 'nullable|numeric|min:0|max:100',
             'prices_include_tax' => 'nullable|boolean',
+            'default_trendyol_brand_id' => 'nullable|integer|min:1',
+            'default_trendyol_category_id' => 'nullable|integer|min:1',
+            'default_trendyol_brand_name' => 'nullable|string|max:120',
         ]);
         $data['prices_include_tax'] = $request->boolean('prices_include_tax');
         $source->update($data);
@@ -77,6 +80,9 @@ class SourceController extends Controller
             'min_margin_percent' => 'nullable|numeric|min:0|max:500',
             'tax_rate' => 'nullable|numeric|min:0|max:100',
             'prices_include_tax' => 'nullable|boolean',
+            'default_trendyol_brand_id' => 'nullable|integer|min:1',
+            'default_trendyol_category_id' => 'nullable|integer|min:1',
+            'default_trendyol_brand_name' => 'nullable|string|max:120',
         ]);
 
         $data['slug'] = Str::slug($data['name']).'-'.Str::random(4);

@@ -34,6 +34,16 @@
                 <div class="col-md-4"><label class="form-label">XML KDV %</label><input type="number" step="0.01" min="0" max="100" name="tax_rate" class="form-control" value="{{ old('tax_rate', 20) }}"></div>
             </div>
             <div class="form-check mb-3"><input type="checkbox" name="prices_include_tax" value="1" class="form-check-input" id="includeTax"><label class="form-check-label" for="includeTax">XML alış fiyatları KDV dahil</label></div>
+            
+            <div class="border rounded p-3 mb-3 bg-light">
+                <div class="fw-semibold mb-2">Trendyol (opsiyonel)</div>
+                <div class="row g-2">
+                    <div class="col-md-4"><label class="form-label">Varsayılan Marka No</label><input type="number" min="1" name="default_trendyol_brand_id" class="form-control" value="{{ old('default_trendyol_brand_id') }}"></div>
+                    <div class="col-md-4"><label class="form-label">Varsayılan Marka Adı</label><input name="default_trendyol_brand_name" class="form-control" value="{{ old('default_trendyol_brand_name') }}"></div>
+                    <div class="col-md-4"><label class="form-label">Varsayılan Kategori No</label><input type="number" min="1" name="default_trendyol_category_id" class="form-control" value="{{ old('default_trendyol_category_id') }}"></div>
+                </div>
+            </div>
+
             <button type="submit" class="btn btn-primary">Kaydet</button>
             <a href="{{ route('admin.sources.index') }}" class="btn btn-link">İptal</a>
         </form>
