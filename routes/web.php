@@ -18,6 +18,26 @@ use App\Http\Controllers\XmlFeedController;
 use Illuminate\Support\Facades\Route;
 
 
+
+Route::get('/health-detail', function () {
+    $out = ['ok' => true, 'php' => PHP_VERSION];
+    try {
+        \Illuminate\Support\Facades\DB::select('select 1');
+        $out['db'] = 'ok';
+    } catch (\Throwable $e) {
+        $out['ok'] = false;
+        $out['db'] = $e->getMessage();
+    }
+    try {
+        $out['sources_cols'] = \Illuminate\Support\Facades\Schema::hasTable('sources')
+            ? \Illuminate\Support\Facades\Schema::getColumnListing('sources')
+            : [];
+    } catch (\Throwable $e) {
+        $out['sources_cols_error'] = $e->getMessage();
+    }
+    return response()->json($out);
+});
+
 Route::get('/ping', function () {
     return response('ok', 200)->header('Content-Type', 'text/plain');
 });
