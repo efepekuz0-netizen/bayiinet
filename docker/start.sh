@@ -1,6 +1,17 @@
 #!/bin/sh
 cd /app || exit 1
 
+# Büyük XML yükleme (URL indirme + dosya)
+export PHP_INI_SCAN_DIR="${PHP_INI_SCAN_DIR:-}"
+php -d upload_max_filesize=256M -d post_max_size=256M -d memory_limit=512M -r "echo '';" >/dev/null 2>&1 || true
+# artisan/serve icin kalici ini
+cat > /usr/local/etc/php/conf.d/99-uploads.ini << 'INIEOF'
+upload_max_filesize = 256M
+post_max_size = 256M
+memory_limit = 512M
+max_execution_time = 300
+INIEOF
+
 if [ -z "$APP_KEY" ]; then
     APP_KEY="$(php artisan key:generate --show)"
     export APP_KEY

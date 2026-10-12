@@ -73,8 +73,8 @@ class XmlImportService
             }
 
             $contents = $response->body();
-            if (strlen($contents) > 50 * 1024 * 1024) {
-                throw new \RuntimeException('XML dosyası 50 MB boyut sınırını aşıyor.');
+            if (strlen($contents) > 200 * 1024 * 1024) {
+                throw new \RuntimeException('XML dosyası 200 MB boyut sınırını aşıyor.');
             }
 
             if (! Storage::disk('local')->put($relativePath, $contents)) {

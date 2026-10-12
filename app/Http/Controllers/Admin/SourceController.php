@@ -110,7 +110,7 @@ class SourceController extends Controller
     public function upload(Request $request, Source $source, XmlImportService $importService)
     {
         $request->validate([
-            'xml_file' => 'required|file|mimes:xml,txt|max:51200', // 50MB
+            'xml_file' => 'required|file|mimes:xml,txt|max:204800', // 200MB
         ]);
 
         $file = $request->file('xml_file');
